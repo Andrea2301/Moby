@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Main application theme -->
+    <style name="Theme.Moby" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+
+    <!-- Splash Screen theme -->
+    <style name="Theme.Moby.Launch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_moby_splash</item>
+        <item name="windowSplashScreenBackground">#F8F9FA</item> <!-- ArrecifeBackground -->
+        <item name="postSplashScreenTheme">@style/Theme.Moby</item>
+    </style>
+
+</resources>

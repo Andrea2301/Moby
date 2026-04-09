@@ -1,0 +1,50 @@
+# Built artifacts
+bin/
+gen/
+out/
+app/build/
+build/
+
+# Kotlin
+.kotlin/
+kotlin-daemon-embeddable-*.jar
+
+# Gradle
+.gradle/
+build/
+gradlew
+gradlew.bat
+gradle/wrapper/gradle-wrapper.jar
+gradle/wrapper/gradle-wrapper.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/gradle.xml
+.idea/assetWizardSettings.xml
+.idea/dictionaries
+.idea/libraries
+.idea/caches
+
+# Local configuration
+local.properties
+.bundle/
+vendor/bundle/
+*.log
+
+# External Native Build
+.externalNativeBuild/
+.cxx/
+cmake_install.cmake
+CMakeCache.txt
+CMakeFiles/
+Makefile
+rules.ninja
+
+# OS-specific files
+.DS_Store
+Thumbs.db
