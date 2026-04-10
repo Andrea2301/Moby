@@ -22,6 +22,12 @@ interface PublicationDao {
     @Update
     suspend fun updatePublication(publication: Publication)
 
+    @Query("UPDATE publications SET totalPages = :count WHERE id = :pubId")
+    suspend fun updateTotalPages(pubId: String, count: Int)
+
+    @Query("UPDATE publications SET currentPosition = :pos, lastRead = :lastRead WHERE id = :pubId")
+    suspend fun updatePublicationPosition(pubId: String, pos: Int, lastRead: Long = System.currentTimeMillis())
+
     @Query("DELETE FROM publications")
     suspend fun deleteAllPublications()
 

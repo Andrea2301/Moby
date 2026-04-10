@@ -115,7 +115,7 @@ fun ReaderScreen(
 
     val pub = publication!!
 
-    // 🚀 DYNAMIC SYSTEM BARS COLOR: Match the reader theme
+    //  DYNAMIC SYSTEM BARS COLOR: Match the reader theme
     // This removes the white bar issue by making sys bars transparent or matching bg
     val sideEffectScope = rememberCoroutineScope()
     LaunchedEffect(backgroundColor) {
@@ -284,7 +284,7 @@ fun ReaderScreen(
             }
         }
 
-        // 🌟 SETTINGS HUD
+        //  SETTINGS HUD
         AnimatedVisibility(
             visible = showSettings,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -321,15 +321,7 @@ fun ReaderScreen(
         }
 
         
-        // Progress Indicator
-        if (!showControls && !showSettings) {
-            Text(
-                text = "${currentPage + 1} / $totalPages",
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp).navigationBarsPadding(),
-                style = MaterialTheme.typography.labelSmall,
-                color = if (isDark) Color.White.copy(0.4f) else Color.Black.copy(0.4f)
-            )
-        }
+
     }
 }
 

@@ -1,9 +1,5 @@
 package com.example.moby.logic.readers
 
-import com.example.moby.ui.screens.ReaderTheme
-import android.webkit.MimeTypeMap
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.animation.AnimatedContent
@@ -12,13 +8,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.VerticalPager
@@ -28,9 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
@@ -43,90 +32,12 @@ import java.io.File
 import java.util.zip.ZipFile
 import kotlin.math.absoluteValue
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ZIP CACHE
-// ─────────────────────────────────────────────────────────────────────────────
-private object ZipCache {
-    private var cachedPath: String? = null
-    private var cachedZip: ZipFile? = null
+import com.example.moby.ui.screens.ReaderTheme
+import com.example.moby.logic.readers.epub.*
 
-    @Synchronized
-    fun readEntry(filePath: String, entryPath: String): ByteArray? {
-        return try {
-            if (cachedPath != filePath || cachedZip == null) {
-                cachedZip?.close()
-                cachedZip = ZipFile(File(filePath))
-                cachedPath = filePath
-            }
-            val entry = cachedZip?.getEntry(entryPath) ?: return null
-            cachedZip?.getInputStream(entry)?.readBytes()
-        } catch (e: Exception) {
-            cachedZip?.close()
-            cachedZip = null; cachedPath = null; null
-        }
-    }
-
-    @Synchronized
-    fun close() { cachedZip?.close(); cachedZip = null; cachedPath = null }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS DE TEMA
-// ─────────────────────────────────────────────────────────────────────────────
-private fun ReaderTheme.toColor() = when (this) {
-    ReaderTheme.ARRECIFE -> Color(0xFFF8F9FA)
-    ReaderTheme.CRETA    -> Color(0xFFF4ECD8)
-    ReaderTheme.PAPIRUS  -> Color(0xFFD2D2D2)
-    ReaderTheme.ABISAL   -> Color(0xFF011627)
-}
-private fun ReaderTheme.toBgHex() = when (this) {
-    ReaderTheme.ARRECIFE -> "#F8F9FA"
-    ReaderTheme.CRETA    -> "#F4ECD8"
-    ReaderTheme.PAPIRUS  -> "#D2D2D2"
-    ReaderTheme.ABISAL   -> "#011627"
-}
-private fun ReaderTheme.toTextHex() = when (this) {
-    ReaderTheme.ARRECIFE -> "#2C3E50"
-    ReaderTheme.CRETA    -> "#423425"
-    ReaderTheme.PAPIRUS  -> "#1A1A1A"
-    ReaderTheme.ABISAL   -> "#D0D0D0"
-}
-private fun ReaderTheme.toLinkHex() = when (this) {
-    ReaderTheme.ABISAL -> "#7EC8E3"
-    else               -> "#2980B9"
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// JAVASCRIPT BRIDGE
-// ─────────────────────────────────────────────────────────────────────────────
-class EpubJavascriptBridge(
-    private val scope: kotlinx.coroutines.CoroutineScope,
-    private val onVirtualPageCountReady: (Int) -> Unit,
-    private val onTextSelectedRaw: (String, String, Float, Float) -> Unit,
-    private val onSelectionClearedRaw: () -> Unit,
-    private val onLeftTap: () -> Unit,
-    private val onRightTap: () -> Unit,
-    private val onCenterTap: () -> Unit
-) {
-    @android.webkit.JavascriptInterface
-    fun onPageCountReady(count: Int) { scope.launch(kotlinx.coroutines.Dispatchers.Main) { onVirtualPageCountReady(count) } }
-    @android.webkit.JavascriptInterface
-    fun onTextSelected(text: String, cfi: String, top: Float, left: Float, w: Float, h: Float) {
-        scope.launch(kotlinx.coroutines.Dispatchers.Main) { onTextSelectedRaw(text, cfi, left, top) }
-    }
-    @android.webkit.JavascriptInterface
-    fun onSelectionCleared() { scope.launch(kotlinx.coroutines.Dispatchers.Main) { onSelectionClearedRaw() } }
-    @android.webkit.JavascriptInterface
-    fun onTapLeft() { scope.launch(kotlinx.coroutines.Dispatchers.Main) { onLeftTap() } }
-    @android.webkit.JavascriptInterface
-    fun onTapRight() { scope.launch(kotlinx.coroutines.Dispatchers.Main) { onRightTap() } }
-    @android.webkit.JavascriptInterface
-    fun onTapCenter() { scope.launch(kotlinx.coroutines.Dispatchers.Main) { onCenterTap() } }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
 // EPUB READER COMPONENT
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
 @Composable
 fun EpubReaderComponent(
     publicationId: String,
@@ -181,7 +92,7 @@ fun EpubReaderComponent(
         }
     }
 
-    DisposableEffect(Unit) { onDispose { ZipCache.close() } }
+    DisposableEffect(Unit) { onDispose { EpubZipEngine.close() } }
 
     if (fileLoadError || chapters.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -197,24 +108,66 @@ fun EpubReaderComponent(
     val scope = rememberCoroutineScope()
     var virtualPageIndex by remember { mutableIntStateOf(0) }
     val chapterPageCounts = remember { mutableStateMapOf<Int, Int>() }
-    val virtualPageCount  = chapterPageCounts[pagerState.currentPage] ?: 1
-    val isChapterReady    = chapterPageCounts.containsKey(pagerState.currentPage)
 
-    // FIX: iniciar en TRUE para que el pager pueda recibir el primer swipe
-    var isPagingSwipeAllowed by remember { mutableStateOf(true) }
-
-    // Limpiar al cambiar configuración visual
-    LaunchedEffect(fontSize, fontFamily, lineSpacing, theme, isVerticalMode) {
-        chapterPageCounts.clear()
-        virtualPageIndex = 0
+    val virtualPageCount = chapterPageCounts[pagerState.currentPage] ?: 1
+    val isChapterReady   = chapterPageCounts.containsKey(pagerState.currentPage)
+    val totalBookPages   = remember(chapterPageCounts.size) {
+        chapters.indices.sumOf { chapterPageCounts[it] ?: 0 }
     }
 
-    // Aterrizar en última página al navegar hacia atrás
+    var isMainChapterReady by remember { mutableStateOf(false) }
+    var scanPointer        by remember { mutableIntStateOf(-1) }
+
+    val scanSequence = remember(chapters.size, pagerState.currentPage) {
+        if (chapters.isEmpty()) return@remember emptyList<Int>()
+        val cur = pagerState.currentPage
+        val result = mutableListOf(cur)
+        var i = 1
+        while (result.size < chapters.size) {
+            if (cur + i < chapters.size) result.add(cur + i)
+            if (cur - i >= 0)            result.add(cur - i)
+            i++
+        }
+        result
+    }
+
+    LaunchedEffect(chapters.size, fontSize, fontFamily, lineSpacing, isVerticalMode) {
+        if (chapters.isEmpty()) return@LaunchedEffect
+        isMainChapterReady = false
+        virtualPageIndex   = 0
+        delay(800)
+        chapterPageCounts.clear()
+        scanPointer = 0
+    }
+
+    LaunchedEffect(isChapterReady) {
+        if (isChapterReady) isMainChapterReady = true
+    }
+
+    val currentScanIdx = if (
+        scanSequence.isNotEmpty() && scanPointer in scanSequence.indices
+    ) scanSequence[scanPointer] else -1
+
+    // Guardar posición con debounce
+    LaunchedEffect(pagerState.currentPage, virtualPageIndex, totalBookPages) {
+        delay(600)
+        val globalPage = (0 until pagerState.currentPage)
+            .sumOf { chapterPageCounts[it] ?: 0 } + (virtualPageIndex + 1)
+        onVirtualPageChanged(globalPage, totalBookPages)
+        if (totalBookPages > 0) dao.updatePublicationPosition(publicationId, globalPage)
+    }
+
+    LaunchedEffect(totalBookPages, isChapterReady) {
+        if (totalBookPages > 0 && chapterPageCounts.size == chapters.size) {
+            dao.updateTotalPages(publicationId, totalBookPages)
+        }
+    }
+
     var previousChapter by remember { mutableIntStateOf(pagerState.currentPage) }
     var landOnLastPage  by remember { mutableStateOf(false) }
 
     LaunchedEffect(pagerState.currentPage) {
-        val goingBack = pagerState.currentPage < previousChapter
+        val goingBack   = pagerState.currentPage < previousChapter
         previousChapter = pagerState.currentPage
         landOnLastPage  = goingBack
         virtualPageIndex = 0
@@ -224,13 +177,10 @@ fun EpubReaderComponent(
     LaunchedEffect(isChapterReady, virtualPageCount) {
         if (isChapterReady && landOnLastPage) {
             virtualPageIndex = maxOf(0, virtualPageCount - 1)
-            landOnLastPage = false
+            landOnLastPage   = false
         }
     }
 
-    // FIX: navegar desde el menú de capítulos
-    // Cuando initialChapter cambia externamente (ej: el usuario pulsa un capítulo
-    // en el índice), saltamos sin animación para que sea inmediato y confiable.
     LaunchedEffect(initialChapter) {
         val target = initialChapter.coerceIn(0, chapters.size - 1)
         if (pagerState.currentPage != target) {
@@ -240,70 +190,55 @@ fun EpubReaderComponent(
         }
     }
 
-    LaunchedEffect(virtualPageIndex, virtualPageCount) {
-        onVirtualPageChanged(virtualPageIndex, virtualPageCount)
-    }
-
-    // Fuentes únicas de navegación — usadas tanto por swipe como por taps del JS
+    // ── Navegación: fuente única de verdad ────────────────────────────────────
+    // Estas lambdas son las ÚNICAS que modifican virtualPageIndex y el pager.
+    // Tanto los botones del overlay como el bridge JS las llaman.
+    // Al vivir aquí (en EpubReaderComponent) siempre leen el estado más reciente
+    // — no hay riesgo de closures stale como ocurre cuando se pasan a composables hijos.
     val goLeft: () -> Unit = {
-        if (isChapterReady) {
-            if (!isVerticalMode) {
-                if (virtualPageIndex > 0) virtualPageIndex--
-                else if (pagerState.currentPage > 0)
-                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-            } else {
-                if (pagerState.currentPage > 0)
-                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+        if (!isVerticalMode) {
+            if (virtualPageIndex > 0) {
+                virtualPageIndex--
+            } else if (pagerState.currentPage > 0) {
+                landOnLastPage = true
+                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
             }
+        } else {
+            if (pagerState.currentPage > 0)
+                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
         }
     }
+
     val goRight: () -> Unit = {
-        if (isChapterReady) {
-            if (!isVerticalMode) {
-                if (virtualPageIndex < virtualPageCount - 1) virtualPageIndex++
-                else if (pagerState.currentPage < chapters.size - 1)
-                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-            } else {
-                if (pagerState.currentPage < chapters.size - 1)
-                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+        if (!isVerticalMode) {
+            val maxPage = chapterPageCounts[pagerState.currentPage] ?: 1
+            if (virtualPageIndex < maxPage - 1) {
+                virtualPageIndex++
+            } else if (pagerState.currentPage < chapters.size - 1) {
+                virtualPageIndex = 0
+                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
             }
+        } else {
+            if (pagerState.currentPage < chapters.size - 1)
+                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
         }
     }
 
     val bg = theme.toColor()
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(isVerticalMode) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        when (event.type) {
-                            PointerEventType.Press -> isPagingSwipeAllowed = true
-                            PointerEventType.Move  -> {
-                                val change = event.changes.firstOrNull() ?: continue
-                                val delta  = change.position - change.previousPosition
-                                val dx = kotlin.math.abs(delta.x)
-                                val dy = kotlin.math.abs(delta.y)
-                                // Deshabilitar swipe solo si el gesto opuesto es muy dominante
-                                if (!isVerticalMode && dy > dx * 3f) isPagingSwipeAllowed = false
-                                if (isVerticalMode  && dx > dy * 3f) isPagingSwipeAllowed = false
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-            }
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
         val pagerModifier = Modifier.fillMaxSize().background(bg)
 
         if (!isVerticalMode) {
             HorizontalPager(
                 state = pagerState,
-                userScrollEnabled = isPagingSwipeAllowed,
-                modifier = pagerModifier,
-                beyondViewportPageCount = 1
+                // userScrollEnabled = false: la navegación es 100% por taps.
+                // Habilitar el swipe del pager compite con el scroll del WebView
+                // y produce saltos accidentales de capítulo completo.
+                // beyondViewportPageCount = 0: Reducimos drásticamente el consumo de RAM.
+                // El renderizado del siguiente capítulo comenzará solo cuando navegues a él,
+                // eliminando el "lag" durante la lectura del capítulo actual.
+                beyondViewportPageCount = 0
             ) { page ->
                 val offset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
                 Box(modifier = Modifier.fillMaxSize().graphicsLayer {
@@ -313,14 +248,14 @@ fun EpubReaderComponent(
                     alpha  = lerp(0.5f,  1f, 1f - abs)
                 }) {
                     EpubChapterRender(
-                        publicationId = publicationId, dao = dao,
-                        filePath = filePath,
-                        internalPath = opfDir + android.net.Uri.decode(chapters[page]),
-                        theme = theme, fontSize = fontSize,
-                        fontFamily = fontFamily, lineSpacing = lineSpacing,
-                        isVerticalMode = false,
+                        publicationId    = publicationId, dao = dao,
+                        filePath         = filePath,
+                        internalPath     = opfDir + android.net.Uri.decode(chapters[page]),
+                        theme            = theme, fontSize = fontSize,
+                        fontFamily       = fontFamily, lineSpacing = lineSpacing,
+                        isVerticalMode   = false,
                         virtualPageIndex = if (page == pagerState.currentPage) virtualPageIndex else 0,
-                        onLeftTap = goLeft, onRightTap = goRight, onCenterTap = onCenterTap,
+                        onLeftTap        = goLeft, onRightTap = goRight, onCenterTap = onCenterTap,
                         onVirtualPageCountReady = { count -> chapterPageCounts[page] = count }
                     )
                 }
@@ -328,27 +263,89 @@ fun EpubReaderComponent(
         } else {
             VerticalPager(
                 state = pagerState,
-                userScrollEnabled = isPagingSwipeAllowed,
+                userScrollEnabled = true,
                 modifier = pagerModifier
             ) { page ->
                 EpubChapterRender(
-                    publicationId = publicationId, dao = dao,
-                    filePath = filePath,
-                    internalPath = opfDir + android.net.Uri.decode(chapters[page]),
-                    theme = theme, fontSize = fontSize,
-                    fontFamily = fontFamily, lineSpacing = lineSpacing,
-                    isVerticalMode = true, virtualPageIndex = 0,
-                    onLeftTap = goLeft, onRightTap = goRight, onCenterTap = onCenterTap,
+                    publicationId    = publicationId, dao = dao,
+                    filePath         = filePath,
+                    internalPath     = opfDir + android.net.Uri.decode(chapters[page]),
+                    theme            = theme, fontSize = fontSize,
+                    fontFamily       = fontFamily, lineSpacing = lineSpacing,
+                    isVerticalMode   = true, virtualPageIndex = 0,
+                    onLeftTap        = goLeft, onRightTap = goRight, onCenterTap = onCenterTap,
                     onVirtualPageCountReady = { chapterPageCounts[page] = 1 }
                 )
             }
         }
+
+        // ── OVERLAY DE NAVEGACIÓN POR MÁRGENES ───────────────────────────────
+        // Dos franjas laterales transparentes de 52dp.
+        // Reciben taps directamente en Compose — sin pasar por el WebView,
+        // sin bridge JS, sin latencia de roundtrip JS→Kotlin.
+        // Son más fiables que el bridge porque:
+        //   1. Compose las procesa en el mismo frame
+        //   2. No dependen de que el WebView esté listo
+        //   3. No se ven afectadas por recargas del WebView
+        if (!isVerticalMode) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Zona Izquierda: 80dp (Optimizado para pantallas curvas)
+                // Activación en el instante del contacto (Down) para latencia cero.
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(80.dp)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitFirstDown()
+                                    goLeft()
+                                }
+                            }
+                        }
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                // Zona Derecha: 80dp (Optimizado para pantallas curvas)
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(80.dp)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitFirstDown()
+                                    goRight()
+                                }
+                            }
+                        }
+                )
+            }
+        }
+
+        // ── SCANNER INVISIBLE ─────────────────────────────────────────────────
+        if (currentScanIdx in chapters.indices && isMainChapterReady) {
+            EpubScannerComponent(
+                publicationId  = publicationId,
+                filePath       = filePath,
+                internalPath   = opfDir + android.net.Uri.decode(chapters[currentScanIdx]),
+                theme          = theme, fontSize = fontSize,
+                fontFamily     = fontFamily, lineSpacing = lineSpacing,
+                isVerticalMode = isVerticalMode,
+                onPageCountReady = { count ->
+                    chapterPageCounts[currentScanIdx] = count
+                    scanPointer++
+                }
+            )
+        }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
 // EPUB CHAPTER RENDER
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
 @Composable
 fun EpubChapterRender(
     publicationId: String,
@@ -374,10 +371,10 @@ fun EpubChapterRender(
     var isPageReady     by remember { mutableStateOf(false) }
     val scope           = rememberCoroutineScope()
 
-    // Scroll a página virtual — solo cuando la página está lista
+    // Scroll a página virtual
     LaunchedEffect(virtualPageIndex, isPageReady) {
         if (!isVerticalMode && isPageReady) {
-            delay(60)
+            // Latencia Cero: Ejecución inmediata sin delay artificial.
             webViewRef.value?.evaluateJavascript(
                 """(function(){
                     var w = window.__mobyW || document.documentElement.clientWidth || window.innerWidth;
@@ -387,182 +384,29 @@ fun EpubChapterRender(
         }
     }
 
-    // Construir HTML al cambiar capítulo o configuración
+    // Cargar HTML — sin delay(250), con clave estable
     LaunchedEffect(internalPath, isVerticalMode, fontSize, fontFamily, lineSpacing, theme) {
-        delay(250) // Debounce rapid slider changes to prevent WebView reload thrashing
         isPageReady = false
+        htmlContent = null
         withContext(Dispatchers.IO) {
             try {
                 val z = ZipFile(File(filePath))
                 val e = z.getEntry(internalPath)
                 if (e != null) {
                     val raw = z.getInputStream(e).bufferedReader().readText(); z.close()
-                    val bodyContent = Regex("(?si)<body[^>]*>(.*?)</body>").find(raw)?.groupValues?.get(1) ?: raw
-
-                    val bgHex    = theme.toBgHex()
-                    val textHex  = theme.toTextHex()
-                    val linkHex  = theme.toLinkHex()
-                    val fontStack = if (fontFamily == "Sans") "sans-serif" else "Georgia, serif"
-                    val layoutCss = if (isVerticalMode) """
-                        overflow-y: auto !important; height: auto !important; min-height: 100% !important;
-                        display: block !important; width: 100% !important; padding: 48px 28px 96px 28px !important;
-                    """ else """
-                        width: 100% !important; height: 100% !important; overflow: hidden !important;
-                        display: block !important; -webkit-column-width: 100% !important; column-width: 100% !important;
-                        -webkit-column-gap: 0 !important; column-fill: auto !important; padding: 48px 28px 96px 28px !important;
-                    """
-
-                    // JS escrito en ES5 puro — compatible con WebView API 21+
-                    val html = """
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<style>
-::-webkit-scrollbar { display: none !important; }
-*, *::before, *::after { box-sizing: border-box !important; }
-html { margin:0 !important; padding:0 !important; width:100% !important; height:100% !important;
-       background-color:$bgHex !important; -webkit-text-size-adjust:100% !important; text-size-adjust:100% !important; }
-body { margin:0 !important; width:100% !important;
-       background-color:$bgHex !important; color:$textHex !important;
-       font-family:$fontStack !important; font-size:${fontSize.toInt()}% !important;
-       line-height:${String.format(java.util.Locale.US, "%.2f", lineSpacing)} !important;
-       word-wrap:break-word !important; overflow-wrap:break-word !important;
-       $layoutCss }
-img, svg { max-width:100% !important; height:auto !important; display:block !important; margin:10px auto !important; }
-p   { margin:0 0 1em 0 !important; text-align:justify !important; width: 100% !important; }
-h1  { font-size:1.6em !important; margin:0.5em 0 !important; }
-h2  { font-size:1.35em !important; margin:0.5em 0 !important; }
-h3  { font-size:1.15em !important; margin:0.5em 0 !important; }
-a   { color:$linkHex !important; text-decoration:none !important; }
-pre, code { white-space:pre-wrap !important; word-break:break-all !important; }
-table { max-width:100% !important; table-layout:fixed !important; }
-</style>
-<script>
-var __mobyW        = 0;
-var __mobyTarget   = 0;
-var __mobyReady    = false;
-var __mobyVertical = ${isVerticalMode};
-
-function mobyMeasure() {
-    var w = document.documentElement.clientWidth || window.innerWidth || 0;
-    if (w <= 0) return false;
-    __mobyW = w; return true;
-}
-
-function mobySync(targetPage) {
-    if (!mobyMeasure()) return false;
-    if (__mobyVertical) {
-        if (window.mobyBridge) window.mobyBridge.onPageCountReady(1);
-        return true;
-    }
-    var reflow   = document.body.offsetHeight;
-    var scrollW  = document.documentElement.scrollWidth || document.body.scrollWidth || __mobyW;
-    var count    = Math.max(1, Math.round(scrollW / __mobyW));
-    if (window.mobyBridge) window.mobyBridge.onPageCountReady(count);
-    if (targetPage > 0) window.scrollTo(targetPage * __mobyW, 0);
-    __mobyReady = true; return true;
-}
-
-function mobyInit(targetPage, attempt) {
-    attempt = attempt || 0;
-    __mobyTarget = targetPage || 0;
-    if (mobySync(targetPage)) return;
-    if (attempt < 12) setTimeout(function() { mobyInit(targetPage, attempt + 1); }, 80 + attempt * 60);
-}
-
-function getXPath(node) {
-    if (!node || node === document.body) return '/html/body';
-    if (!node.parentNode) return '';
-    var count = 0; var siblings = node.parentNode.childNodes;
-    for (var i = 0; i < siblings.length; i++) {
-        var sib = siblings[i];
-        if (sib === node) {
-            var name = node.nodeType === 3 ? 'text()' : node.nodeName.toLowerCase();
-            return getXPath(node.parentNode) + '/' + name + '[' + (count + 1) + ']';
-        }
-        if (sib.nodeType === node.nodeType && sib.nodeName === node.nodeName) count++;
-    }
-    return '';
-}
-function serializeRange(range) {
-    return getXPath(range.startContainer) + ':' + range.startOffset
-         + '|' + getXPath(range.endContainer) + ':' + range.endOffset;
-}
-function resolveXPath(xpath) {
-    try { return document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue; }
-    catch(e) { return null; }
-}
-function loadHighlights(jsonStr) {
-    try {
-        var arr = JSON.parse(jsonStr);
-        document.body.contentEditable = 'true';
-        for (var i = 0; i < arr.length; i++) {
-            var parts = arr[i].cfiInfo.split('|');
-            var start = parts[0].split(':'); var end = parts[1].split(':');
-            var sNode = resolveXPath(start[0]); var eNode = resolveXPath(end[0]);
-            if (sNode && eNode) {
-                var r = document.createRange();
-                r.setStart(sNode, parseInt(start[1])); r.setEnd(eNode, parseInt(end[1]));
-                var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
-                document.execCommand('hiliteColor', false, arr[i].colorHex);
-            }
-        }
-        window.getSelection().removeAllRanges(); 
-        document.body.contentEditable = 'false';
-    } catch(e) {}
-}
-function confirmHighlight(colorHex) {
-    document.body.contentEditable = 'true';
-    document.execCommand('hiliteColor', false, colorHex);
-    document.body.contentEditable = 'false';
-    window.getSelection().removeAllRanges();
-}
-
-// Selección de texto
-document.addEventListener('selectionchange', function() {
-    var sel = window.getSelection();
-    if (sel && sel.rangeCount > 0 && sel.toString().trim().length > 0) {
-        var range = sel.getRangeAt(0);
-        var rect  = range.getBoundingClientRect();
-        if (window.mobyBridge) window.mobyBridge.onTextSelected(
-            sel.toString(), serializeRange(range), rect.top, rect.left, rect.width, rect.height);
-    } else {
-        if (window.mobyBridge) window.mobyBridge.onSelectionCleared();
-    }
-});
-
-// Taps de navegación reactivos a nivel de kernel móvil (evita retrasos de click)
-var tsX = 0, tsY = 0;
-document.addEventListener('touchstart', function(e){
-    tsX = e.changedTouches[0].clientX;
-    tsY = e.changedTouches[0].clientY;
-}, {passive: true});
-document.addEventListener('touchend', function(e){
-    if (document.body.contentEditable === 'true') return;
-    if (window.getSelection && window.getSelection().toString().length > 0) return;
-    var teX = e.changedTouches[0].clientX;
-    var teY = e.changedTouches[0].clientY;
-    if (Math.abs(teX - tsX) < 15 && Math.abs(teY - tsY) < 15) {
-        var w = window.innerWidth || document.documentElement.clientWidth;
-        if      (teX < w * 0.25) { if (window.mobyBridge) window.mobyBridge.onTapLeft(); }
-        else if (teX > w * 0.75) { if (window.mobyBridge) window.mobyBridge.onTapRight(); }
-        else                     { if (window.mobyBridge) window.mobyBridge.onTapCenter(); }
-    }
-}, {passive: false});
-
-window.onload = function() { setTimeout(function() { mobyInit(__mobyTarget, 0); }, 150); };
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(function() { if (!__mobyReady) mobyInit(__mobyTarget, 0); }, 80);
-});
-</script>
-</head>
-<body>$bodyContent</body>
-</html>
-                    """.trimIndent()
+                    val bodyContent = Regex("(?si)<body[^>]*>(.*?)</body>")
+                        .find(raw)?.groupValues?.get(1) ?: raw
+                    val html = EpubHtmlContent.build(
+                        bodyContent      = bodyContent,
+                        theme            = theme,
+                        fontSize         = fontSize,
+                        fontFamily       = fontFamily,
+                        lineSpacing      = lineSpacing,
+                        isVerticalMode   = isVerticalMode,
+                        virtualPageIndex = virtualPageIndex
+                    )
                     withContext(Dispatchers.Main) { htmlContent = html }
-                } else { z.close() }
+                } else z.close()
             } catch (e: Exception) { e.printStackTrace() }
         }
     }
@@ -570,20 +414,30 @@ document.addEventListener('DOMContentLoaded', function() {
     val bg = theme.toColor()
 
     Box(modifier = Modifier.fillMaxSize().background(bg), contentAlignment = Alignment.Center) {
+        // Animar por internalPath, no por htmlContent.
+        // htmlContent es un String nuevo en cada carga aunque el capítulo sea el mismo —
+        // animarlo causaba transiciones innecesarias y creaba WebViews duplicados.
         AnimatedContent(
-            targetState = internalPath, // FIX: Solo animar al cambiar de capítulo, no al cambiar fuente/tema
+            targetState = internalPath,
             transitionSpec = { fadeIn(tween(400)) togetherWith fadeOut(tween(400)) },
+            contentAlignment = Alignment.Center,
             label = "EpubFade"
-        ) { chapterPath ->
+        ) { animatedPath ->
             val content = htmlContent
-            if (content != null) {
-                val chapterDir = chapterPath.substringBeforeLast("/", "")
-                val baseUrl    = if (chapterDir.isNotEmpty()) "moby-epub://book/$chapterDir/" else "moby-epub://book/"
+
+            if (content != null && animatedPath == internalPath) {
+                val chapterDir = animatedPath.substringBeforeLast("/", "")
+                val baseUrl = if (chapterDir.isNotEmpty()) "moby-epub://book/$chapterDir/"
+                else "moby-epub://book/"
 
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
                         WebView(ctx).apply {
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                            )
                             setBackgroundColor(android.graphics.Color.TRANSPARENT)
                             isVerticalScrollBarEnabled   = isVerticalMode
                             isHorizontalScrollBarEnabled = false
@@ -595,22 +449,19 @@ document.addEventListener('DOMContentLoaded', function() {
                                 textZoom             = 100
                                 useWideViewPort      = false
                                 loadWithOverviewMode = false
-                                setSupportZoom(false)
-                                builtInZoomControls  = false
-                                displayZoomControls  = false
                                 cacheMode            = android.webkit.WebSettings.LOAD_NO_CACHE
                                 mixedContentMode     = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             }
+
                             val bridge = EpubJavascriptBridge(
                                 scope = scope,
                                 onVirtualPageCountReady = onVirtualPageCountReady,
                                 onTextSelectedRaw = { text, cfi, left, top ->
-                                    val d = ctx.resources.displayMetrics.density
-                                    activeSelection = SelectionInfo(text, cfi, left * d, top * d)
+                                    activeSelection = SelectionInfo(text, cfi, left, top)
                                 },
                                 onSelectionClearedRaw = { activeSelection = null },
-                                onLeftTap = onLeftTap,
-                                onRightTap = onRightTap,
+                                onLeftTap   = onLeftTap,
+                                onRightTap  = onRightTap,
                                 onCenterTap = onCenterTap
                             )
                             addJavascriptInterface(bridge, "mobyBridge")
@@ -618,10 +469,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             webViewClient = object : WebViewClient() {
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
-                                    // FIX: mobyInit con retry — no mobySync directo
                                     view?.evaluateJavascript("mobyInit($virtualPageIndex, 0);", null)
                                     isPageReady = true
-                                    // Cargar highlights
+
                                     scope.launch(Dispatchers.IO) {
                                         val ann = dao.getAnnotationsForChapter(publicationId, internalPath)
                                         if (ann.isNotEmpty()) {
@@ -639,44 +489,38 @@ document.addEventListener('DOMContentLoaded', function() {
                                         }
                                     }
                                 }
-                                override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+
+                                override fun shouldInterceptRequest(
+                                    view: WebView?,
+                                    request: android.webkit.WebResourceRequest?
+                                ): android.webkit.WebResourceResponse? {
                                     val uri = request?.url ?: return null
                                     if (uri.scheme != "moby-epub") return null
-                                    val decoded = android.net.Uri.decode(uri.path?.removePrefix("/") ?: return null)
-                                    val bytes = ZipCache.readEntry(filePath, decoded) ?: run {
+                                    val decoded = android.net.Uri.decode(
+                                        uri.path?.removePrefix("/") ?: return null
+                                    )
+                                    val bytes = EpubZipEngine.readEntry(filePath, decoded) ?: run {
                                         val cDir = internalPath.substringBeforeLast("/", "")
-                                        val rel  = if (cDir.isNotEmpty()) "$cDir/$decoded" else decoded
-                                        ZipCache.readEntry(filePath, rel)
+                                        EpubZipEngine.readEntry(
+                                            filePath,
+                                            if (cDir.isNotEmpty()) "$cDir/$decoded" else decoded
+                                        )
                                     } ?: return null
-                                    val ext  = decoded.substringAfterLast('.', "").lowercase()
-                                    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
-                                        ?: when (ext) {
-                                            "css"         -> "text/css"
-                                            "js"          -> "application/javascript"
-                                            "svg"         -> "image/svg+xml"
-                                            "jpg","jpeg"  -> "image/jpeg"
-                                            "png"         -> "image/png"
-                                            "gif"         -> "image/gif"
-                                            "webp"        -> "image/webp"
-                                            "ttf"         -> "font/ttf"
-                                            "otf"         -> "font/otf"
-                                            "woff"        -> "font/woff"
-                                            "woff2"       -> "font/woff2"
-                                            else          -> "application/octet-stream"
-                                        }
-                                    return WebResourceResponse(mime, "UTF-8", bytes.inputStream())
+                                    return android.webkit.WebResourceResponse(
+                                        EpubZipEngine.getMimeType(decoded), "UTF-8", bytes.inputStream()
+                                    )
                                 }
                             }
                         }
                     },
                     update = { view ->
-                        // FIX: tag usa el hashCode del contenido para recargar cuando cambia (fuente, tema) sin destruir la vista
-                        val currentHash = content.hashCode()
-                        if (view.tag != currentHash) {
-                            view.tag      = currentHash
+                        // Usamos un Hash del contenido para forzar recarga si cambian fuentes/temas
+                        val contentKey = animatedPath + (content?.hashCode() ?: 0)
+                        if (view.tag != contentKey) {
+                            view.tag = contentKey
                             webViewRef.value = view
-                            isPageReady   = false
-                            view.loadDataWithBaseURL(baseUrl, content, "text/html", "utf-8", null)
+                            isPageReady = false
+                            view.loadDataWithBaseURL(baseUrl, content!!, "text/html", "utf-8", null)
                         }
                     }
                 )
@@ -685,60 +529,134 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        // ── POPUP DE COLORES PARA HIGHLIGHTS ────────────────────────────────
         if (activeSelection != null) {
-            val sel = activeSelection!!
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures {
+            EpubSelectionPopup(
+                xdp = activeSelection!!.x,
+                ydp = activeSelection!!.y,
+                onColorSelected = { hex ->
+                    val sel = activeSelection!!
+                    scope.launch(Dispatchers.IO) {
+                        dao.insertAnnotation(
+                            com.example.moby.models.BookAnnotation(
+                                publicationId = publicationId,
+                                chapterPath   = internalPath,
+                                cfiInfo       = sel.cfi,
+                                selectedText  = sel.text,
+                                colorHex      = hex
+                            )
+                        )
+                        withContext(Dispatchers.Main) {
+                            webViewRef.value?.evaluateJavascript("confirmHighlight('$hex');", null)
                             activeSelection = null
-                            webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
                         }
                     }
-            ) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .offset(x = maxOf(16f, sel.x - 60f).dp, y = maxOf(64f, sel.y - 80f).dp),
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 16.dp
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        listOf("#FFF59D", "#A5D6A7", "#90CAF9", "#F48FB1").forEach { hex ->
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(android.graphics.Color.parseColor(hex)))
-                                    .clickable {
-                                        scope.launch(Dispatchers.IO) {
-                                            dao.insertAnnotation(
-                                                com.example.moby.models.BookAnnotation(
-                                                    publicationId = publicationId,
-                                                    chapterPath   = internalPath,
-                                                    cfiInfo       = sel.cfi,
-                                                    selectedText  = sel.text,
-                                                    colorHex      = hex
-                                                )
-                                            )
-                                            withContext(Dispatchers.Main) {
-                                                webViewRef.value?.evaluateJavascript("confirmHighlight('$hex');", null)
-                                                activeSelection = null
-                                            }
-                                        }
-                                    }
-                            )
+                },
+                onDismiss = {
+                    activeSelection = null
+                    webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
+                }
+            )
+        }
+    }
+}
+
+// =============================================================================
+// EPUB SCANNER COMPONENT
+// =============================================================================
+@Composable
+fun EpubScannerComponent(
+    publicationId: String,
+    filePath: String,
+    internalPath: String,
+    theme: ReaderTheme,
+    fontSize: Float,
+    fontFamily: String,
+    lineSpacing: Float,
+    isVerticalMode: Boolean,
+    onPageCountReady: (Int) -> Unit
+) {
+    var rawHtml by remember(internalPath) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(internalPath, fontSize, fontFamily, lineSpacing, theme) {
+        rawHtml = null
+        withContext(Dispatchers.IO) {
+            try {
+                val z = ZipFile(File(filePath))
+                val e = z.getEntry(internalPath)
+                if (e != null) {
+                    val raw = z.getInputStream(e).bufferedReader().readText(); z.close()
+                    val body = Regex("(?si)<body[^>]*>(.*?)</body>")
+                        .find(raw)?.groupValues?.get(1) ?: raw
+                    val html = EpubHtmlContent.build(
+                        body, theme, fontSize, fontFamily, lineSpacing, isVerticalMode, 0
+                    )
+                    withContext(Dispatchers.Main) { rawHtml = html }
+                } else z.close()
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    if (rawHtml != null) {
+        val chapterDir = internalPath.substringBeforeLast("/", "")
+        val baseUrl    = if (chapterDir.isNotEmpty()) "moby-epub://book/$chapterDir/"
+        else "moby-epub://book/"
+
+        // alpha = 0.01f en lugar de 0f: con alpha exactamente 0 algunos sistemas
+        // omiten el layout del composable y el WebView no puede medir scrollWidth.
+        Box(modifier = Modifier.size(1.dp).graphicsLayer { alpha = 0.01f }) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        settings.apply {
+                            javaScriptEnabled    = true
+                            textZoom             = 100
+                            useWideViewPort      = false
+                            loadWithOverviewMode = false
+                            cacheMode            = android.webkit.WebSettings.LOAD_NO_CACHE
                         }
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                view?.evaluateJavascript("mobyInit(0, 0);", null)
+                            }
+                            override fun shouldInterceptRequest(
+                                view: WebView?,
+                                request: android.webkit.WebResourceRequest?
+                            ): android.webkit.WebResourceResponse? {
+                                val uri = request?.url ?: return null
+                                if (uri.scheme != "moby-epub") return null
+                                val decoded = android.net.Uri.decode(
+                                    uri.path?.removePrefix("/") ?: return null
+                                )
+                                val bytes = EpubZipEngine.readEntry(filePath, decoded) ?: run {
+                                    val cDir = internalPath.substringBeforeLast("/", "")
+                                    EpubZipEngine.readEntry(
+                                        filePath,
+                                        if (cDir.isNotEmpty()) "$cDir/$decoded" else decoded
+                                    )
+                                } ?: return null
+                                return android.webkit.WebResourceResponse(
+                                    EpubZipEngine.getMimeType(decoded), "UTF-8", bytes.inputStream()
+                                )
+                            }
+                        }
+                        addJavascriptInterface(object : Any() {
+                            @android.webkit.JavascriptInterface
+                            fun onPageCountReady(count: Int) {
+                                post { onPageCountReady(if (isVerticalMode) 1 else maxOf(1, count)) }
+                            }
+                        }, "mobyBridge")
+                    }
+                },
+                update = { view ->
+                    val htmlKey = internalPath + fontSize + lineSpacing
+                    if (view.tag != htmlKey) {
+                        view.tag = htmlKey
+                        view.loadDataWithBaseURL(baseUrl, rawHtml!!, "text/html", "utf-8", null)
                     }
                 }
-            }
+            )
         }
     }
 }
