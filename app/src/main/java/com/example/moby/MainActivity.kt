@@ -33,7 +33,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var metadataExtractor: BookMetadataExtractor
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splashScreen = installSplashScreen()
+        // Animación de salida instantánea para pasar de inmediato a tu transición
+        splashScreen.setOnExitAnimationListener { splashProvider ->
+            splashProvider.remove()
+        }
         super.onCreate(savedInstanceState)
         
         preferencesManager = PreferencesManager(this)
@@ -48,17 +52,21 @@ class MainActivity : ComponentActivity() {
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
             val scope = rememberCoroutineScope()
             var currentScreen: MobyScreen by remember { mutableStateOf(MobyScreen.Home) }
-            
-            // Intercept system Back gestures
-            androidx.activity.compose.BackHandler(enabled = currentScreen != MobyScreen.Home) {
-                if (currentScreen is MobyScreen.Reader) {
-                    currentScreen = MobyScreen.Library
-                } else {
-                    currentScreen = MobyScreen.Home
-                }
-            }
+            var showLanding by remember { mutableStateOf(true) }
 
-            MobyTheme(darkTheme = isAbisal) {
+            if (showLanding) {
+                MobyLandingScreen(onFinished = { showLanding = false })
+            } else {
+                // Intercept system Back gestures
+                androidx.activity.compose.BackHandler(enabled = currentScreen != MobyScreen.Home) {
+                    if (currentScreen is MobyScreen.Reader) {
+                        currentScreen = MobyScreen.Library
+                    } else {
+                        currentScreen = MobyScreen.Home
+                    }
+                }
+
+                MobyTheme(darkTheme = isAbisal) {
                 ModalNavigationDrawer(
                     drawerState = drawerState,
                     drawerContent = {
@@ -121,13 +129,13 @@ class MainActivity : ComponentActivity() {
                                     publicationId = (currentScreen as MobyScreen.Reader).publicationId,
                                     onBack = { currentScreen = MobyScreen.Library },
                                     isAbisal = isAbisal,
-                                    preferencesManager = preferencesManager // 🧠 PASS MEMORY
-                                )
+                                    preferencesManager = preferencesManager)//  PASS MEMORY
                             }
                         }
                     }
                 }
             }
         }
+    }
     }
 }

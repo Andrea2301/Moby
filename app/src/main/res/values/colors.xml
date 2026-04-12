@@ -7,4 +7,10 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Moby Ocean Palette -->
+    <color name="moby_abisal">#103740</color>
+    <color name="moby_deep">#266B73</color>
+    <color name="moby_turquoise">#56B5BF</color>
+    <color name="moby_surface">#5FD9D9</color>
 </resources>

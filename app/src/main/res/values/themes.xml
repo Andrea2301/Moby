@@ -3,14 +3,18 @@
 
     <!-- Main application theme -->
     <style name="Theme.Moby" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/moby_abisal</item>
+        <item name="android:statusBarColor">@color/moby_abisal</item>
     </style>
-
+ 
     <!-- Splash Screen theme -->
     <style name="Theme.Moby.Launch" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_moby_splash</item>
-        <item name="windowSplashScreenBackground">#F8F9FA</item> <!-- ArrecifeBackground -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="windowSplashScreenBackground">@android:color/white</item> 
         <item name="postSplashScreenTheme">@style/Theme.Moby</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 
 </resources>

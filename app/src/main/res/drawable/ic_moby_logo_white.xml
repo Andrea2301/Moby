@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="80dp"
+    android:viewportWidth="200"
+    android:viewportHeight="80">
+
+    <!-- Elegant White Text "MOBY" (Approximation of the logo style) -->
+    <!-- M -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M15,55 L15,25 L22,25 L28,45 L34,25 L41,25 L41,55 L36,55 L36,32 L29,55 L27,55 L20,32 L20,55 Z" />
+    <!-- O -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M58,25 C50,25 46,30 46,40 C46,50 50,55 58,55 C66,55 70,50 70,40 C70,30 66,25 58,25 M58,30 C63,30 65,33 65,40 C65,47 63,50 58,50 C53,50 51,47 51,40 C51,33 53,30 58,30" />
+    <!-- B -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M78,25 L78,55 L90,55 C95,55 98,52 98,48 C98,44 95,42 92,41 C96,40 97,38 97,33 C97,28 94,25 88,25 Z M83,30 L87,30 C90,30 92,31 92,34 C92,37 90,38 87,38 L83,38 Z M83,43 L88,43 C91,43 93,44 93,48 C93,51 91,52 88,52 L83,52 Z" />
+    <!-- Y -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M106,25 L112,25 L118,40 L124,25 L130,25 L121,45 L121,55 L115,55 L115,45 Z" />
+
+    <!-- Artistic White Whale Icon (Matching the user's logo style) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M145,45 C145,45 150,38 160,38 C170,38 185,45 185,45 C185,45 190,48 198,48 C205,48 202,38 202,35 C202,30 195,28 190,28 C185,28 178,32 173,32 C168,32 163,28 158,28 C150,28 145,35 145,40 Z" />
+    <!-- Whale Tail detail -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M188,22 C188,22 189,18 192,18 C195,18 196,22 196,22" />
+</vector>
