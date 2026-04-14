@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
                                     preferencesManager = preferencesManager,
                                     onNavigate = { screen -> currentScreen = screen }
                                 )
-                                MobyScreen.Bookmarks -> BookmarksScreen()
+                                MobyScreen.Bookmarks -> BookmarksScreen ()
                                 MobyScreen.Journal -> JournalScreen()
                                 is MobyScreen.Reader -> ReaderScreen(
                                     publicationId = (currentScreen as MobyScreen.Reader).publicationId,

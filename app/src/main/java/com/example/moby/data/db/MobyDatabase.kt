@@ -5,7 +5,7 @@ import androidx.room.*
 import com.example.moby.models.BookAnnotation
 import com.example.moby.models.Publication
 
-@Database(entities = [Publication::class, BookAnnotation::class], version = 3, exportSchema = false)
+@Database(entities = [Publication::class, BookAnnotation::class], version = 4, exportSchema = false)
 @TypeConverters(PublicationConverters::class)
 abstract class MobyDatabase : RoomDatabase() {
     abstract fun publicationDao(): PublicationDao

@@ -78,6 +78,7 @@ object EpubHtmlContent {
             var __mobyTarget   = $virtualPageIndex;
             var __mobyCount    = 1;
             var __mobyVertical = $isVerticalMode;
+            var __mobySyncLock = false;
 
             function mobyMeasure() {
                 var w = window.innerWidth || document.documentElement.clientWidth || 0;
@@ -86,7 +87,16 @@ object EpubHtmlContent {
                 var el = document.getElementById('moby-columns');
                 if (el) {
                     __mobyCount = Math.max(1, Math.ceil(el.scrollWidth / w));
-                    if (window.mobyBridge) window.mobyBridge.onPageCountReady(__mobyCount);
+                    if (window.mobyBridge) {
+                        window.mobyBridge.onPageCountReady(__mobyCount);
+                        // Sincronizar el target real si era -1
+                        if (__mobyTarget === -1) {
+                            __mobyTarget = __mobyCount - 1;
+                            if (window.mobyBridge.onVirtualPageIndexChanged) {
+                                window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
+                            }
+                        }
+                    }
                 }
                 return true;
             }
@@ -94,7 +104,9 @@ object EpubHtmlContent {
             function mobySync() {
                 if (!mobyMeasure()) return;
                 var el = document.getElementById('moby-columns');
-                if (el) el.style.transform = 'translateX(-' + (__mobyTarget * __mobyW) + 'px)';
+                if (el) {
+                    el.style.transform = 'translateX(-' + (__mobyTarget * __mobyW) + 'px)';
+                }
             }
 
             function mobyNext() {
@@ -106,6 +118,9 @@ object EpubHtmlContent {
                 if (__mobyTarget < __mobyCount - 1) {
                     __mobyTarget++;
                     mobySync();
+                    if (window.mobyBridge && window.mobyBridge.onVirtualPageIndexChanged) {
+                        window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
+                    }
                 } else {
                     if (window.mobyBridge) window.mobyBridge.onChapterBoundary(true);
                 }
@@ -119,6 +134,9 @@ object EpubHtmlContent {
                 if (__mobyTarget > 0) {
                     __mobyTarget--;
                     mobySync();
+                    if (window.mobyBridge && window.mobyBridge.onVirtualPageIndexChanged) {
+                        window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
+                    }
                 } else {
                     if (window.mobyBridge) window.mobyBridge.onChapterBoundary(false);
                 }
@@ -127,13 +145,15 @@ object EpubHtmlContent {
             function mobyInit(targetPage) {
                 __mobyTarget = targetPage;
                 mobySync();
-                setTimeout(mobySync, 100);
+                // Re-sync después de un breve delay por si el renderizado cambió el ancho
+                setTimeout(mobySync, 150);
             }
 
             (function() {
                 var tsX = 0, tsY = 0;
                 document.addEventListener('touchstart', function(e){ tsX = e.changedTouches[0].clientX; tsY = e.changedTouches[0].clientY; }, {passive: true});
                 document.addEventListener('touchend', function(e){
+                    if (window.getSelection && window.getSelection().toString().length > 0) return;
                     var teX = e.changedTouches[0].clientX; var teY = e.changedTouches[0].clientY;
                     if (Math.abs(teX - tsX) < 15 && Math.abs(teY - tsY) < 15) {
                         var w = window.innerWidth;

@@ -29,43 +29,39 @@ fun HomeScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
         Text(
             text = if (isAbisal) "Profundidades Abisales" else "Arrecife de Luz",
             style = MaterialTheme.typography.displayMedium,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Black,
             color = MaterialTheme.colorScheme.primary,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(16.dp))
         Text(
-            text = if (lastBook != null) 
-                "Bienvenido de nuevo. ¿Continuamos con '${lastBook.title}'?" 
-                else "Bienvenido a tu santuario de lectura minimalista.",
+            text = "Bienvenido a tu santuario de lectura minimalista.",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(48.dp))
         
         if (lastBook != null) {
-            Button(
-                onClick = { onNavigate(MobyScreen.Reader(lastBook.id)) },
-                modifier = Modifier.fillMaxWidth(0.7f),
-                shape = MaterialTheme.shapes.medium
+            com.example.moby.ui.components.FeaturedBookCard(
+                publication = lastBook,
+                onContinueReading = { onNavigate(MobyScreen.Reader(lastBook.id)) }
+            )
+        } else {
+            OutlinedButton(
+                onClick = { onNavigate(MobyScreen.Library) },
+                modifier = Modifier.fillMaxWidth(0.7f).height(56.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
             ) {
-                Text("Continuar Lectura")
+                Text("Explorar la Biblioteca")
             }
-        }
-        
-        OutlinedButton(
-            onClick = { onNavigate(MobyScreen.Library) },
-            modifier = Modifier.fillMaxWidth(0.7f).padding(top = 12.dp),
-            shape = MaterialTheme.shapes.medium
-        ) {
-            Text("Ir a la Biblioteca")
         }
     }
 }

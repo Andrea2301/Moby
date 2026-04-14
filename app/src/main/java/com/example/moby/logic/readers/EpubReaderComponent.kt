@@ -31,6 +31,7 @@ fun EpubReaderComponent(
     publicationId: String,
     filePath: String,
     initialChapter: Int,
+    initialVirtualPage: Int = 0,
     onChapterChanged: (Int) -> Unit,
     onVirtualPageChanged: (Int, Int) -> Unit = { _, _ -> },
     onTotalChaptersReady: (Int) -> Unit,
@@ -81,27 +82,39 @@ fun EpubReaderComponent(
 
     val pagerState = rememberPagerState(initialPage = initialChapter.coerceIn(0, chapters.size - 1), pageCount = { chapters.size })
     val scope = rememberCoroutineScope()
-    var virtualPageIndex by remember { mutableIntStateOf(0) }
+    var virtualPageIndex by remember { mutableIntStateOf(initialVirtualPage) }
     val chapterPageCounts = remember { mutableStateMapOf<Int, Int>() }
     val totalBookPages = remember(chapterPageCounts.size) { chapters.indices.sumOf { chapterPageCounts[it] ?: 0 } }
     var landOnLastPage by remember { mutableStateOf(false) }
+    var isFirstLoad by remember { mutableStateOf(true) }
 
     LaunchedEffect(pagerState.currentPage, virtualPageIndex, totalBookPages) {
         delay(600)
         val globalPage = (0 until pagerState.currentPage).sumOf { chapterPageCounts[it] ?: 0 } + (virtualPageIndex + 1)
         onVirtualPageChanged(globalPage, totalBookPages)
-        if (totalBookPages > 0) dao.updatePublicationPosition(publicationId, globalPage)
     }
 
     LaunchedEffect(pagerState.currentPage) {
-        // Al cambiar de capítulo real, reseteamos virtual
-        if (!landOnLastPage) virtualPageIndex = 0
+        if (isFirstLoad) {
+            // Primera carga: conserva initialVirtualPage para restaurar posición guardada
+            isFirstLoad = false
+        } else {
+            if (!landOnLastPage) virtualPageIndex = 0
+        }
         onChapterChanged(pagerState.currentPage)
     }
 
     LaunchedEffect(initialChapter) {
         val target = initialChapter.coerceIn(0, chapters.size - 1)
         if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+    }
+
+    // Guarda posición codificada: (capítulo+1)*10000 + paginaVirtual
+    // Retrocompatible — valores guardados anteriores son < 10000
+    LaunchedEffect(pagerState.currentPage, virtualPageIndex) {
+        delay(500)
+        val encoded = (pagerState.currentPage + 1) * 10000 + virtualPageIndex
+        dao.updatePublicationPosition(publicationId, encoded)
     }
 
     val bg = theme.toColor()
@@ -122,7 +135,10 @@ fun EpubReaderComponent(
                     internalPath = opfDir + android.net.Uri.decode(chapters[page]),
                     theme = theme, fontSize = fontSize, fontFamily = fontFamily, lineSpacing = lineSpacing,
                     isVerticalMode = isVerticalMode,
-                    virtualPageIndex = if (page == pagerState.currentPage) virtualPageIndex else if (landOnLastPage) 999 else 0,
+                    // -1 indica "ir a la última página" de forma segura controlada por JS
+                    virtualPageIndex = if (page == pagerState.currentPage) {
+                        if (landOnLastPage) -1 else virtualPageIndex
+                    } else 0,
                     onChapterBoundary = { reachedEnd ->
                         if (reachedEnd) {
                             if (pagerState.currentPage < chapters.size - 1) {
@@ -137,14 +153,15 @@ fun EpubReaderComponent(
                             }
                         }
                     },
-                    onVirtualPageIndexChanged = { idx -> if (page == pagerState.currentPage) virtualPageIndex = idx },
+                    onVirtualPageIndexChanged = { idx -> 
+                        if (page == pagerState.currentPage) {
+                            virtualPageIndex = idx
+                            if (landOnLastPage) landOnLastPage = false
+                        }
+                    },
                     onCenterTap = onCenterTap,
                     onVirtualPageCountReady = { count ->
                         chapterPageCounts[page] = count
-                        if (page == pagerState.currentPage && landOnLastPage) {
-                            virtualPageIndex = count - 1
-                            landOnLastPage = false
-                        }
                     }
                 )
             }
@@ -223,6 +240,7 @@ fun EpubChapterRender(
                             @android.webkit.JavascriptInterface fun onPageCountReady(count: Int) { scope.launch(Dispatchers.Main) { onVirtualPageCountReady(count) } }
                             @android.webkit.JavascriptInterface fun onChapterBoundary(reachedEnd: Boolean) { scope.launch(Dispatchers.Main) { onChapterBoundary(reachedEnd) } }
                             @android.webkit.JavascriptInterface fun onTapCenter() { scope.launch(Dispatchers.Main) { onCenterTap() } }
+                            @android.webkit.JavascriptInterface fun onVirtualPageIndexChanged(idx: Int) { scope.launch(Dispatchers.Main) { onVirtualPageIndexChanged(idx) } }
                         }, "mobyBridge")
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {

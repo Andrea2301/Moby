@@ -20,6 +20,7 @@ data class Publication(
     val currentPosition: Int = 0,
     val filePath: String,
     val lastRead: Long = System.currentTimeMillis(),
+    val dateAdded: Long = System.currentTimeMillis(),
     val isVerticalMode: Boolean = false
 ) {
     val progress: Float

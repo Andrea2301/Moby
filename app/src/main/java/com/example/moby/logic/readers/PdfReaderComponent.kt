@@ -90,7 +90,7 @@ fun PdfReaderComponent(
             }
         }
 
-        // 🧠 INTELLIGENT THEME FILTER: Inverts for Abisal, Tints for Creta/Papirus
+        // Filtro de color según el tema activo
         val nightFilter = when (theme) {
             ReaderTheme.ABISAL -> ColorFilter.tint(Color.White, BlendMode.Difference)
             ReaderTheme.CRETA -> ColorFilter.tint(Color(0xFFF4ECD8), BlendMode.Multiply)
@@ -178,7 +178,7 @@ fun PdfPageRender(
     renderer: PdfRenderer, 
     pageIndex: Int, 
     cache: LruCache<Int, Bitmap>,
-    colorFilter: ColorFilter? // 🌙 Pass the night vision filter
+    colorFilter: ColorFilter?
 ) {
     var bitmap by remember { mutableStateOf<Bitmap?>(cache.get(pageIndex)) }
 
@@ -187,7 +187,6 @@ fun PdfPageRender(
             withContext(Dispatchers.IO) {
                 try {
                     val page = renderer.openPage(pageIndex)
-                    // Scale bitmap for clarity (Standard PDF is often low-DPI relative to modern screens)
                     val b = Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888)
                     page.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                     page.close()
@@ -204,7 +203,6 @@ fun PdfPageRender(
                 bitmap = bitmap!!.asImageBitmap(),
                 contentDescription = "Page $pageIndex",
                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                    // Slight quality enhancement: ensure sharp rendering
                     clip = true
                 },
                 contentScale = ContentScale.Fit,

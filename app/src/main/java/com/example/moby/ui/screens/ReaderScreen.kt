@@ -26,7 +26,7 @@ import com.example.moby.models.PublicationFormat
 import com.example.moby.logic.readers.PdfReaderComponent
 import com.example.moby.logic.readers.CbzReaderComponent
 import com.example.moby.logic.readers.EpubReaderComponent
-import com.example.moby.data.PreferencesManager // 🧠 Import memory
+import com.example.moby.data.PreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,7 +43,7 @@ fun ReaderScreen(
     publicationId: String, 
     onBack: () -> Unit,
     isAbisal: Boolean,
-    preferencesManager: PreferencesManager // 🧠 Injected memory
+    preferencesManager: PreferencesManager
 ) {
     val context = LocalContext.current
     val dao = remember { MobyDatabase.getDatabase(context).publicationDao() }
@@ -115,6 +115,12 @@ fun ReaderScreen(
 
     val pub = publication!!
 
+    // Decodifica posición guardada: valores >= 10000 usan formato (cap+1)*10000 + páginaVirtual
+    // Valores < 10000 son el formato anterior (solo índice de capítulo)
+    val rawPos = pub.currentPosition
+    val savedChapter = if (rawPos >= 10000) (rawPos / 10000) - 1 else rawPos
+    val savedVirtualPage = if (rawPos >= 10000) rawPos % 10000 else 0
+
     //  DYNAMIC SYSTEM BARS COLOR: Match the reader theme
     // This removes the white bar issue by making sys bars transparent or matching bg
     val sideEffectScope = rememberCoroutineScope()
@@ -127,7 +133,7 @@ fun ReaderScreen(
     val progressUpdateHandler: (Int) -> Unit = { page ->
         currentPage = page
         scope.launch(Dispatchers.IO) {
-            dao.updatePublication(pub.copy(currentPosition = page, lastRead = System.currentTimeMillis()))
+            dao.updatePublicationPosition(pub.id, page)
         }
     }
 
@@ -154,7 +160,8 @@ fun ReaderScreen(
                     EpubReaderComponent(
                         publicationId = pub.id,
                         filePath = pub.filePath,
-                        initialChapter = pub.currentPosition,
+                        initialChapter = savedChapter,
+                        initialVirtualPage = savedVirtualPage,
                         onChapterChanged = progressUpdateHandler,
                         onVirtualPageChanged = { index, count -> virtualPageIndex = index; virtualPageCount = count },
                         onTotalChaptersReady = { totalPages = it },
