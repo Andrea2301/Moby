@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -72,6 +74,8 @@ fun ReaderScreen(
     var lineSpacing: Float by remember { mutableFloatStateOf(savedLineSpacing) }
     var brightness: Float by remember { mutableFloatStateOf(savedBrightness) }
     var showSettings: Boolean by remember { mutableStateOf(false) }
+    var isSmartFitEnabled: Boolean by remember { mutableStateOf(false) }
+    var isTextReflowEnabled: Boolean by remember { mutableStateOf(false) }
 
     // Sync local state when DataStore loads (first time or from other places)
     LaunchedEffect(savedTheme) { readerTheme = ReaderTheme.valueOf(savedTheme) }
@@ -87,6 +91,7 @@ fun ReaderScreen(
                 publication = pub
                 isLoading = false
                 currentPage = pub?.currentPosition ?: 0
+                isTextReflowEnabled = pub?.isTextReflowEnabled ?: false
             }
         }
     }
@@ -144,11 +149,15 @@ fun ReaderScreen(
                 PublicationFormat.PDF -> {
                     PdfReaderComponent(
                         filePath = pub.filePath,
-                        initialPage = pub.currentPosition,
+                        initialPage = currentPage,
                         onPageChanged = progressUpdateHandler,
                         onTotalPagesReady = { totalPages = it },
                         isVerticalMode = pub.isVerticalMode,
                         theme = readerTheme,
+                        isSmartFitEnabled = isSmartFitEnabled,
+                        isTextReflowEnabled = isTextReflowEnabled,
+                        fontSize = fontSize,
+                        fontFamily = fontFamily,
                         onCenterTap = {
                             if (showSettings || showChapterList) {
                                 showSettings = false; showChapterList = false
@@ -157,11 +166,14 @@ fun ReaderScreen(
                     )
                 }
                 PublicationFormat.EPUB -> {
+                    val epChapter = if (currentPage >= 10000) (currentPage / 10000) - 1 else currentPage
+                    val epVirtualPage = if (currentPage >= 10000) currentPage % 10000 else 0
+                    
                     EpubReaderComponent(
                         publicationId = pub.id,
                         filePath = pub.filePath,
-                        initialChapter = savedChapter,
-                        initialVirtualPage = savedVirtualPage,
+                        initialChapter = epChapter,
+                        initialVirtualPage = epVirtualPage,
                         onChapterChanged = progressUpdateHandler,
                         onVirtualPageChanged = { index, count -> virtualPageIndex = index; virtualPageCount = count },
                         onTotalChaptersReady = { totalPages = it },
@@ -171,16 +183,18 @@ fun ReaderScreen(
                         isVerticalMode = pub.isVerticalMode,
                         theme = readerTheme,
                         onCenterTap = {
-                            if (showSettings || showChapterList) {
-                                showSettings = false; showChapterList = false
-                            } else showControls = !showControls
+                            showControls = !showControls
+                            if (!showControls) {
+                                showSettings = false
+                                showChapterList = false
+                            }
                         }
                     )
                 }
                 PublicationFormat.CBZ -> {
                     CbzReaderComponent(
                         filePath = pub.filePath,
-                        initialPage = pub.currentPosition,
+                        initialPage = currentPage,
                         onPageChanged = progressUpdateHandler,
                         onTotalPagesReady = { totalPages = it },
                         isVerticalMode = pub.isVerticalMode,
@@ -291,7 +305,64 @@ fun ReaderScreen(
             }
         }
 
-        //  SETTINGS HUD
+        // BOTTOM BAR (Page Slider & Progress)
+        AnimatedVisibility(
+            visible = showControls && !showSettings && !showChapterList,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+        ) {
+            Surface(
+                color = Color.Black.copy(alpha = 0.8f),
+                contentColor = Color.White,
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (pub.format == PublicationFormat.EPUB) "Cap. ${currentPage + 1}" else "Pág. ${currentPage + 1}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${((currentPage.toFloat() / (totalPages - 1).coerceAtLeast(1)) * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = "$totalPages",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    
+                    Slider(
+                        value = currentPage.toFloat(),
+                        onValueChange = { progressUpdateHandler(it.toInt()) },
+                        valueRange = 0f..maxOf(1f, (totalPages - 1).toFloat()),
+                        steps = if (totalPages in 2..50) totalPages - 2 else 0,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color.White,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.24f)
+                        )
+                    )
+                }
+            }
+        }
+
+        // SETTINGS HUD
         AnimatedVisibility(
             visible = showSettings,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -323,7 +394,17 @@ fun ReaderScreen(
                 onBrightnessChange = { 
                     brightness = it
                     scope.launch { preferencesManager.setReaderSettings(brightness = it) }
-                }
+                },
+                isSmartFitEnabled = isSmartFitEnabled,
+                onSmartFitChange = { isSmartFitEnabled = it },
+                isTextReflowEnabled = isTextReflowEnabled,
+                onTextReflowChange = { enabled ->
+                    isTextReflowEnabled = enabled
+                    scope.launch(Dispatchers.IO) {
+                        dao.updateTextReflowEnabled(pub.id, enabled)
+                    }
+                },
+                isPdf = pub.format == PublicationFormat.PDF
             )
         }
 
@@ -343,16 +424,56 @@ fun ReaderSettingsBottomPanel(
     lineSpacing: Float,
     onLineSpacingChange: (Float) -> Unit,
     brightness: Float,
-    onBrightnessChange: (Float) -> Unit
+    onBrightnessChange: (Float) -> Unit,
+    isSmartFitEnabled: Boolean = false,
+    onSmartFitChange: (Boolean) -> Unit = {},
+    isTextReflowEnabled: Boolean = false,
+    onTextReflowChange: (Boolean) -> Unit = {},
+    isPdf: Boolean = false
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
         tonalElevation = 8.dp
     ) {
-        Column(modifier = Modifier.padding(24.dp).navigationBarsPadding()) {
-            Text("Ajustes de Lectura", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(16.dp))
+        Column(
+            modifier = Modifier
+                .padding(24.dp)
+                .navigationBarsPadding()
+        ) {
+            Text(
+                text = "Ajustes de Lectura",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+            
+            if (isPdf) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Ajustar al ancho (Smart Fit)", style = MaterialTheme.typography.bodyMedium)
+                    Switch(checked = isSmartFitEnabled, onCheckedChange = onSmartFitChange)
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Modo Texto (Reflow)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text("Extrae el texto para ajustar tamaño y fuentes", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = isTextReflowEnabled, onCheckedChange = onTextReflowChange)
+                }
+                HorizontalDivider(modifier = Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+            }
 
             // THEME SELECTOR
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -362,42 +483,48 @@ fun ReaderSettingsBottomPanel(
                 ReaderThemeItem("Abisal", Color(0xFF011627), theme == ReaderTheme.ABISAL) { onThemeChange(ReaderTheme.ABISAL) }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+            if (!isPdf || isTextReflowEnabled) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
 
-            // FONT FAMILY
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Serif", "Sans", "Mono").forEach { font ->
-                    FilterChip(
-                        selected = fontFamily == font,
-                        onClick = { onFontFamilyChange(font) },
-                        label = { Text(font) },
-                        modifier = Modifier.weight(1f)
-                    )
+                // FONT FAMILY
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Serif", "Sans", "Mono").forEach { font ->
+                        FilterChip(
+                            selected = fontFamily == font,
+                            onClick = { onFontFamilyChange(font) },
+                            label = { Text(font) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // FONT SIZE
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.TextFields, "Small", Modifier.size(16.dp))
+                    Slider(value = fontSize, onValueChange = onFontSizeChange, valueRange = 60f..200f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                    Icon(Icons.Default.TextFields, "Large", Modifier.size(24.dp))
+                }
+
+                // LINE SPACING
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.FormatLineSpacing, "Spacing", Modifier.size(20.dp))
+                    Slider(value = lineSpacing, onValueChange = onLineSpacingChange, valueRange = 1.0f..2.5f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
+                    Text("${lineSpacing.toString().take(3)}x", style = MaterialTheme.typography.bodySmall)
                 }
             }
 
-            // FONT SIZE
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.TextFields, "Small", Modifier.size(16.dp))
-                Slider(value = fontSize, onValueChange = onFontSizeChange, valueRange = 60f..200f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
-                Icon(Icons.Default.TextFields, "Large", Modifier.size(24.dp))
-            }
-
-            // LINE SPACING
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.FormatLineSpacing, "Spacing", Modifier.size(20.dp))
-                Slider(value = lineSpacing, onValueChange = onLineSpacingChange, valueRange = 1.0f..2.5f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
-                Text("${lineSpacing.toString().take(3)}x", style = MaterialTheme.typography.bodySmall)
-            }
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
 
             // BRIGHTNESS
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.LightMode, "Brightness", Modifier.size(20.dp))
                 Slider(value = brightness, onValueChange = onBrightnessChange, valueRange = 0.1f..1.0f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
             }
+
+            }
         }
     }
-}
+
 
 @Composable
 fun ReaderThemeItem(name: String, color: Color, isSelected: Boolean, onClick: () -> Unit) {

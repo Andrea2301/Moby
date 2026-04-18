@@ -25,6 +25,7 @@ import com.example.moby.ui.components.MobyDrawerContent
 import com.example.moby.ui.components.MobyTopBar
 import com.example.moby.ui.screens.*
 import com.example.moby.ui.theme.MobyTheme
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -39,6 +40,7 @@ class MainActivity : ComponentActivity() {
             splashProvider.remove()
         }
         super.onCreate(savedInstanceState)
+        PDFBoxResourceLoader.init(this)
         
         preferencesManager = PreferencesManager(this)
         database = MobyDatabase.getDatabase(this)
@@ -71,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     drawerState = drawerState,
                     drawerContent = {
                         MobyDrawerContent(
+                            currentScreen = currentScreen,
                             onNavigate = { screen ->
                                 currentScreen = screen
                                 scope.launch { drawerState.close() }

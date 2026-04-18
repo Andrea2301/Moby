@@ -43,6 +43,8 @@ fun RecentScreen(
             .take(5)
     }
 
+    val pagerState = rememberPagerState(pageCount = { followReading.size })
+
     val recentlyAdded = remember(publications) {
         publications.sortedByDescending { it.dateAdded }
             .take(10)
@@ -52,7 +54,13 @@ fun RecentScreen(
         PlaceholderScreen("Tu Biblioteca", "Añade algunos libros para empezar a leer.")
     } else {
         val historyPubs = remember(publications, recentlyAdded, followReading) {
-            val ignoreSet = followReading.map { it.id }.toSet()
+            val ignoreSet = if (followReading.isNotEmpty()) {
+                followReading.map { it.id }.toSet()
+            } else if (recentlyAdded.isNotEmpty()) {
+                setOf(recentlyAdded.first().id)
+            } else {
+                emptySet()
+            }
             recentlyAdded.filter { it.id !in ignoreSet }
         }
 
@@ -65,99 +73,110 @@ fun RecentScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                item {
-                    Column(modifier = Modifier.padding(top = 24.dp, start = 24.dp, end = 24.dp)) {
-                        Text(
-                            text = "Seguir Leyendo",
-                            style = MaterialTheme.typography.displaySmall.copy(
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = (-1).sp
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(18.dp))
-                    }
-                }
 
                 if (followReading.isNotEmpty()) {
-                    item {
-                        val pagerState = rememberPagerState(pageCount = { followReading.size })
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .wrapContentHeight(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            HorizontalPager(
-                                state = pagerState,
+                        item {
+                            Column(modifier = Modifier.padding(top = 24.dp, start = 24.dp, end = 24.dp)) {
+                                Text(
+                                    text = "Seguir Leyendo",
+                                    style = MaterialTheme.typography.displaySmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = (-1).sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(18.dp))
+                            }
+                        }
+
+                        item {
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(420.dp),
-                                contentPadding = PaddingValues(horizontal = 56.dp),
-                                pageSpacing = 16.dp
-                            ) { page ->
-                                val publication = followReading[page]
-                                val pageOffset =
-                                    (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-                                val absOffset = pageOffset.absoluteValue.coerceIn(0f, 1f)
-
-                                FeaturedBookCard(
-                                    publication = publication,
-                                    onContinueReading = { onNavigate(MobyScreen.Reader(publication.id)) },
+                                    .wrapContentHeight(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                HorizontalPager(
+                                    state = pagerState,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .graphicsLayer {
-                                            // Libro central: tamaño completo, elevado, opaco
-                                            // Libros laterales: más pequeños, bajos y semitransparentes
-                                            scaleX = lerp(0.78f, 1f, 1f - absOffset)
-                                            scaleY = lerp(0.78f, 1f, 1f - absOffset)
-                                            alpha = lerp(0.38f, 1f, 1f - absOffset)
-                                            translationY = lerp(32f, 0f, 1f - absOffset)
-                                        }
-                                        .clickable { onNavigate(MobyScreen.Reader(publication.id)) }
-                                )
-                            }
+                                        .height(420.dp),
+                                    contentPadding = PaddingValues(horizontal = 56.dp),
+                                    pageSpacing = 16.dp
+                                ) { page ->
+                                    val publication = followReading[page]
+                                    val pageOffset =
+                                        (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                                    val absOffset = pageOffset.absoluteValue.coerceIn(0f, 1f)
 
-                            Spacer(modifier = Modifier.height(20.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                repeat(followReading.size) { index ->
-                                    Box(
+                                    FeaturedBookCard(
+                                        publication = publication,
+                                        onContinueReading = { onNavigate(MobyScreen.Reader(publication.id)) },
                                         modifier = Modifier
-                                            .size(if (pagerState.currentPage == index) 10.dp else 8.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (pagerState.currentPage == index)
-                                                    MaterialTheme.colorScheme.primary
-                                                else
-                                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                                            )
+                                            .fillMaxWidth()
+                                            .graphicsLayer {
+                                                // Libro central: tamaño completo, elevado, opaco
+                                                // Libros laterales: más pequeños, bajos y semitransparentes
+                                                scaleX = lerp(0.78f, 1f, 1f - absOffset)
+                                                scaleY = lerp(0.78f, 1f, 1f - absOffset)
+                                                alpha = lerp(0.38f, 1f, 1f - absOffset)
+                                                translationY = lerp(32f, 0f, 1f - absOffset)
+                                            }
                                     )
-                                    if (index < followReading.lastIndex) {
-                                        Spacer(modifier = Modifier.width(8.dp))
+                                }
+
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    repeat(followReading.size) { index ->
+                                        Box(
+                                            modifier = Modifier
+                                                .size(if (pagerState.currentPage == index) 10.dp else 8.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (pagerState.currentPage == index)
+                                                        MaterialTheme.colorScheme.primary
+                                                    else
+                                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                                                )
+                                        )
+                                        if (index < followReading.lastIndex) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
                 } else if (recentlyAdded.isNotEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .wrapContentHeight(),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            FeaturedBookCard(
-                                publication = recentlyAdded.first(),
-                                onContinueReading = { onNavigate(MobyScreen.Reader(recentlyAdded.first().id)) },
-                                modifier = Modifier.clickable { onNavigate(MobyScreen.Reader(recentlyAdded.first().id)) }
-                            )
+                        item {
+                            Column(modifier = Modifier.padding(top = 24.dp, start = 24.dp, end = 24.dp)) {
+                                Text(
+                                    text = "last added",
+                                    style = MaterialTheme.typography.displaySmall.copy(
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = (-1).sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(18.dp))
+                            }
                         }
-                    }
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .wrapContentHeight(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                FeaturedBookCard(
+                                    publication = recentlyAdded.first(),
+                                    onContinueReading = { onNavigate(MobyScreen.Reader(recentlyAdded.first().id)) }
+                                )
+                            }
+                        }
                 }
 
                 if (historyPubs.isNotEmpty()) {
@@ -183,3 +202,4 @@ fun RecentScreen(
         }
     }
 }
+
