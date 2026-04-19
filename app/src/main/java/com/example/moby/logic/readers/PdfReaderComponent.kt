@@ -35,10 +35,10 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineBreak
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -47,7 +47,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import java.io.File
 import java.io.InputStream
 
@@ -61,6 +65,8 @@ fun PdfReaderComponent(
     theme: ReaderTheme,
     isSmartFitEnabled: Boolean,
     isTextReflowEnabled: Boolean,
+    isRtlEnabled: Boolean = false,
+    isWebtoonMode: Boolean = false,
     fontSize: Float,
     fontFamily: String,
     onCenterTap: () -> Unit
@@ -109,15 +115,18 @@ fun PdfReaderComponent(
         }
 
         val nightFilter = when (theme) {
-            ReaderTheme.ABISAL -> {
-                val matrix = androidx.compose.ui.graphics.ColorMatrix(floatArrayOf(
-                    -1f,  0f,  0f, 0f, 255f,
-                     0f, -1f,  0f, 0f, 255f,
-                     0f,  0f, -1f, 0f, 255f,
-                     0f,  0f,  0f, 1f, 0f
-                ))
+            ReaderTheme.ABISAL, ReaderTheme.ONYX -> {
+                val matrix = androidx.compose.ui.graphics.ColorMatrix(
+                    floatArrayOf(
+                        -1f, 0f, 0f, 0f, 255f,
+                        0f, -1f, 0f, 0f, 255f,
+                        0f, 0f, -1f, 0f, 255f,
+                        0f, 0f, 0f, 1f, 0f
+                    )
+                )
                 ColorFilter.colorMatrix(matrix)
             }
+
             ReaderTheme.CRETA -> ColorFilter.tint(Color(0xFFF4ECD8), BlendMode.Multiply)
             ReaderTheme.PAPIRUS -> ColorFilter.tint(Color(0xFFD2D2D2), BlendMode.Multiply)
             else -> null
@@ -127,6 +136,7 @@ fun PdfReaderComponent(
             ReaderTheme.CRETA -> Color(0xFFF4ECD8)
             ReaderTheme.PAPIRUS -> Color(0xFFD2D2D2)
             ReaderTheme.ABISAL -> Color(0xFF011627)
+            ReaderTheme.ONYX -> Color.Black
         }
 
         Box(
@@ -134,10 +144,11 @@ fun PdfReaderComponent(
                 .fillMaxSize()
                 .background(bgColor)
         ) {
-            if (!isVerticalMode) {
+            if (!isVerticalMode && !isWebtoonMode) {
                 HorizontalPager(
                     state = pagerState,
                     userScrollEnabled = isPagingEnabled,
+                    reverseLayout = isRtlEnabled,
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
                     if (isTextReflowEnabled) {
@@ -164,7 +175,8 @@ fun PdfReaderComponent(
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(if (isWebtoonMode) 4.dp else 0.dp)
                 ) {
                     items(pageCount) { page ->
                         if (isTextReflowEnabled) {
@@ -182,7 +194,7 @@ fun PdfReaderComponent(
                                 pageIndex = page,
                                 cache = bitmapCache,
                                 colorFilter = nightFilter,
-                                isSmartFitEnabled = isSmartFitEnabled,
+                                isSmartFitEnabled = isSmartFitEnabled || isWebtoonMode, // Webtoon usually benefits from Smart Fit
                                 onZoomChanged = { isZoomed -> isPagingEnabled = !isZoomed },
                                 onCenterTap = onCenterTap
                             )
@@ -193,6 +205,7 @@ fun PdfReaderComponent(
         }
     }
 }
+
 
 @Composable
 fun PdfReflowRender(
@@ -206,10 +219,12 @@ fun PdfReflowRender(
     var extractedText by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
 
+    val textMeasurer = rememberTextMeasurer()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+
     LaunchedEffect(pageIndex, filePath) {
         withContext(Dispatchers.IO) {
             try {
-                // Usamos .use para garantizar que los streams se cierren correctamente
                 File(filePath).inputStream().use { inputStream ->
                     PDDocument.load(inputStream).use { document ->
                         val stripper = PDFTextStripper()
@@ -231,7 +246,7 @@ fun PdfReflowRender(
     }
 
     val textColor = when (theme) {
-        ReaderTheme.ABISAL -> Color.White
+        ReaderTheme.ABISAL, ReaderTheme.ONYX -> Color.White
         else -> Color.Black
     }
 
@@ -242,18 +257,32 @@ fun PdfReflowRender(
         else -> FontFamily.Default
     }
 
-    Box(
+    val textStyle = TextStyle(
+        color = textColor,
+        fontSize = (fontSize / 6).sp,
+        fontFamily = composeFontFamily,
+        lineHeight = ((fontSize / 6) * 1.5).sp,
+        lineBreak = LineBreak.Paragraph
+    )
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { onCenterTap() })
             }
-            .padding(24.dp),
+            .padding(horizontal = 24.dp, vertical = 16.dp),
         contentAlignment = Alignment.TopStart
     ) {
+        val maxWidth = maxWidth
+        val maxHeight = maxHeight
+
         if (isLoading) {
-            CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = textColor.copy(alpha = 0.5f))
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center),
+                color = textColor.copy(alpha = 0.5f)
+            )
         } else if (extractedText.isNullOrBlank()) {
             Text(
                 "No se pudo extraer texto de esta página (posiblemente es una imagen).",
@@ -262,20 +291,60 @@ fun PdfReflowRender(
                 modifier = Modifier.align(Alignment.Center)
             )
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-            ) {
+            // PAGINATION LOGIC
+            val textPages = remember(extractedText, fontSize, fontFamily, maxWidth, maxHeight) {
+                val pages = mutableListOf<String>()
+                var remainingText = extractedText!!
+                val constraints = with(density) {
+                    Constraints(
+                        maxWidth = maxWidth.roundToPx(),
+                        maxHeight = maxHeight.roundToPx()
+                    )
+                }
+
+                while (remainingText.isNotEmpty()) {
+                    val layoutResult = textMeasurer.measure(
+                        text = remainingText,
+                        style = textStyle,
+                        constraints = constraints
+                    )
+
+                    if (layoutResult.didOverflowHeight) {
+                        val lastLineIndex =
+                            layoutResult.getLineForVerticalPosition(constraints.maxHeight.toFloat())
+                        val endOffset = if (lastLineIndex > 0) {
+                            layoutResult.getLineEnd(lastLineIndex - 1)
+                        } else {
+                            // Fallback if not even one line fits (unlikely)
+                            remainingText.length
+                        }
+
+                        val pageContent = remainingText.substring(0, endOffset).trim()
+                        pages.add(pageContent)
+                        remainingText = remainingText.substring(endOffset).trim()
+                    } else {
+                        pages.add(remainingText.trim())
+                        remainingText = ""
+                    }
+
+                    // Safety break
+                    if (pages.size > 20) break
+                }
+                pages
+            }
+
+            val internalPagerState = rememberPagerState(pageCount = { textPages.size })
+
+            HorizontalPager(
+                state = internalPagerState,
+                modifier = Modifier.fillMaxSize(),
+                beyondViewportPageCount = 1
+            ) { pageIdx ->
                 Text(
-                    text = extractedText!!,
-                    color = textColor,
-                    fontSize = (fontSize / 6).sp,
-                    fontFamily = composeFontFamily,
-                    lineHeight = ((fontSize / 6) * 1.5).sp,
-                    modifier = Modifier.fillMaxWidth()
+                    text = textPages[pageIdx],
+                    style = textStyle,
+                    modifier = Modifier.fillMaxSize()
                 )
-                Spacer(modifier = Modifier.height(100.dp))
             }
         }
     }
@@ -304,7 +373,7 @@ fun PdfPageRender(
     val smartFitScale = remember(bitmap, contentBounds, screenWidthPx) {
         if (bitmap != null && screenWidthPx > 0) {
             val referenceWidth = contentBounds?.width() ?: bitmap!!.width.toFloat()
-            if (referenceWidth > 0) screenWidthPx / referenceWidth else 1f
+            if (referenceWidth > 0) bitmap!!.width.toFloat() / referenceWidth else 1f
         } else 1f
     }
 
@@ -333,7 +402,13 @@ fun PdfPageRender(
             withContext(Dispatchers.IO) {
                 try {
                     val page = renderer.openPage(pageIndex)
-                    val b = Bitmap.createBitmap((page.width * 2.5).toInt(), (page.height * 2.5).toInt(), Bitmap.Config.ARGB_8888)
+                    // Increased resolution for Manga (3.5x)
+                    val scaleFactor = 3.5f
+                    val b = Bitmap.createBitmap(
+                        (page.width * scaleFactor).toInt(),
+                        (page.height * scaleFactor).toInt(),
+                        Bitmap.Config.ARGB_8888
+                    )
                     page.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                     page.close()
                     cache.put(pageIndex, b)
@@ -342,7 +417,9 @@ fun PdfPageRender(
                         bitmap = b
                         contentBounds = bounds
                     }
-                } catch (e: Exception) { e.printStackTrace() }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         } else if (contentBounds == null) {
             launch(Dispatchers.Default) {
@@ -371,13 +448,23 @@ fun PdfPageRender(
                             onZoomChanged(false)
                         } else {
                             val targetScale = 2.5f
-                            val screenCenter = Offset(screenWidthPx / 2f, (configuration.screenHeightDp.dp.toPx() / 2f))
+                            val screenCenter = Offset(
+                                screenWidthPx / 2f,
+                                (configuration.screenHeightDp.dp.toPx() / 2f)
+                            )
                             val diff = (screenCenter - tapOffset)
                             val targetOffset = diff * (targetScale - 1f) / targetScale
-                            val maxX = ((screenWidthPx * targetScale) - screenWidthPx).coerceAtLeast(0f) / (2f * targetScale)
+                            val maxX =
+                                ((screenWidthPx * targetScale) - screenWidthPx).coerceAtLeast(0f) / (2f * targetScale)
                             val screenHeightPx = configuration.screenHeightDp.dp.toPx()
-                            val maxY = ((screenHeightPx * targetScale) - screenHeightPx).coerceAtLeast(0f) / (2f * targetScale)
-                            offset = Offset(targetOffset.x.coerceIn(-maxX, maxX), targetOffset.y.coerceIn(-maxY, maxY))
+                            val maxY =
+                                ((screenHeightPx * targetScale) - screenHeightPx).coerceAtLeast(
+                                    0f
+                                ) / (2f * targetScale)
+                            offset = Offset(
+                                targetOffset.x.coerceIn(-maxX, maxX),
+                                targetOffset.y.coerceIn(-maxY, maxY)
+                            )
                             scale = targetScale
                             onZoomChanged(true)
                         }
@@ -400,10 +487,12 @@ fun PdfPageRender(
                             if (!pastTouchSlop) {
                                 zoom *= zoomChange
                                 pan += panChange
-                                val centroidSize = event.calculateCentroidSize(useCurrent = false)
+                                val centroidSize =
+                                    event.calculateCentroidSize(useCurrent = false)
                                 val zoomMotion = kotlin.math.abs(1 - zoom) * centroidSize
                                 val panMotion = pan.getDistance()
-                                if (zoomMotion > touchSlop || panMotion > touchSlop) pastTouchSlop = true
+                                if (zoomMotion > touchSlop || panMotion > touchSlop) pastTouchSlop =
+                                    true
                             }
                             if (pastTouchSlop) {
                                 val newScale = (scale * zoomChange).coerceIn(1f, 5f)
@@ -413,10 +502,20 @@ fun PdfPageRender(
                                     scale = newScale
                                     if (scale > 1f) {
                                         val newOffset = offset + panChange
-                                        val maxX = ((screenWidthPx * newScale) - screenWidthPx).coerceAtLeast(0f) / (2f * newScale)
-                                        val screenHeightPx = configuration.screenHeightDp.dp.toPx()
-                                        val maxY = ((screenHeightPx * newScale) - screenHeightPx).coerceAtLeast(0f) / (2f * newScale)
-                                        offset = Offset(newOffset.x.coerceIn(-maxX, maxX), newOffset.y.coerceIn(-maxY, maxY))
+                                        val maxX =
+                                            ((screenWidthPx * newScale) - screenWidthPx).coerceAtLeast(
+                                                0f
+                                            ) / (2f * newScale)
+                                        val screenHeightPx =
+                                            configuration.screenHeightDp.dp.toPx()
+                                        val maxY =
+                                            ((screenHeightPx * newScale) - screenHeightPx).coerceAtLeast(
+                                                0f
+                                            ) / (2f * newScale)
+                                        offset = Offset(
+                                            newOffset.x.coerceIn(-maxX, maxX),
+                                            newOffset.y.coerceIn(-maxY, maxY)
+                                        )
                                     } else offset = Offset.Zero
                                     onZoomChanged(scale > 1.05f)
                                 }
@@ -432,7 +531,8 @@ fun PdfPageRender(
             val smartCropOffset = remember(contentBounds, isSmartFitEnabled) {
                 if (isSmartFitEnabled && contentBounds != null && bitmap != null) {
                     val centerPage = Offset(bitmap!!.width / 2f, bitmap!!.height / 2f)
-                    val centerContent = Offset(contentBounds!!.centerX(), contentBounds!!.centerY())
+                    val centerContent =
+                        Offset(contentBounds!!.centerX(), contentBounds!!.centerY())
                     (centerPage - centerContent) / finalScale
                 } else Offset.Zero
             }
@@ -445,11 +545,12 @@ fun PdfPageRender(
                     .graphicsLayer {
                         scaleX = finalScale
                         scaleY = finalScale
-                        translationX = (animatedOffset.x + (if (isSmartFitEnabled) smartCropOffset.x else 0f)) * finalScale
+                        translationX =
+                            (animatedOffset.x + (if (isSmartFitEnabled) smartCropOffset.x else 0f)) * finalScale
                         translationY = animatedOffset.y * finalScale
                         alpha = animatedAlpha
                     },
-                contentScale = ContentScale.Fit,
+                contentScale = if (isSmartFitEnabled) ContentScale.FillWidth else ContentScale.Fit,
                 colorFilter = colorFilter
             )
         } else {
@@ -465,14 +566,20 @@ private fun detectContentBounds(bitmap: Bitmap): RectF {
     var top = height
     var right = 0
     var bottom = 0
-    val step = 10
+    val step = 15 // Increased step for performance with higher resolution
     for (y in 0 until height step step) {
         for (x in 0 until width step step) {
             val pixel = bitmap.getPixel(x, y)
             val r = (pixel shr 16) and 0xFF
             val g = (pixel shr 8) and 0xFF
             val b = pixel and 0xFF
-            if (r < 250 || g < 250 || b < 250) {
+            // Robust detection for both white and black margins
+            // If it's not "very white" and not "very black", it's content
+            // Also detects if it's significantly different from a pure black/white gutter
+            val isWhite = r > 245 && g > 245 && b > 245
+            val isBlack = r < 15 && g < 15 && b < 15
+
+            if (!isWhite && !isBlack) {
                 if (x < left) left = x
                 if (x > right) right = x
                 if (y < top) top = y
@@ -483,7 +590,8 @@ private fun detectContentBounds(bitmap: Bitmap): RectF {
     return if (right < left || bottom < top) {
         RectF(0f, 0f, width.toFloat(), height.toFloat())
     } else {
-        val margin = width * 0.04f
+        // Reduced margin for a tighter fit in Manga/Full-screen mode
+        val margin = width * 0.01f
         RectF(
             (left - margin).coerceAtLeast(0f),
             (top - margin).coerceAtLeast(0f),

@@ -17,7 +17,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
@@ -37,7 +42,8 @@ enum class ReaderTheme {
     ARRECIFE,
     CRETA,
     PAPIRUS,
-    ABISAL
+    ABISAL,
+    ONYX
 }
 
 @Composable
@@ -76,6 +82,9 @@ fun ReaderScreen(
     var showSettings: Boolean by remember { mutableStateOf(false) }
     var isSmartFitEnabled: Boolean by remember { mutableStateOf(false) }
     var isTextReflowEnabled: Boolean by remember { mutableStateOf(false) }
+    var isVerticalMode: Boolean by remember { mutableStateOf(false) }
+    var isRtlEnabled: Boolean by remember { mutableStateOf(false) }
+    var isWebtoonMode: Boolean by remember { mutableStateOf(false) }
 
     // Sync local state when DataStore loads (first time or from other places)
     LaunchedEffect(savedTheme) { readerTheme = ReaderTheme.valueOf(savedTheme) }
@@ -92,16 +101,21 @@ fun ReaderScreen(
                 isLoading = false
                 currentPage = pub?.currentPosition ?: 0
                 isTextReflowEnabled = pub?.isTextReflowEnabled ?: false
+                isVerticalMode = pub?.isVerticalMode ?: false
+                isSmartFitEnabled = pub?.isSmartFitEnabled ?: false
+                isRtlEnabled = pub?.isRtlEnabled ?: false
+                isWebtoonMode = pub?.isWebtoonMode ?: false
             }
         }
     }
 
-    val isDark = readerTheme == ReaderTheme.ABISAL
+    val isDark = readerTheme == ReaderTheme.ABISAL || readerTheme == ReaderTheme.ONYX
     val backgroundColor = when (readerTheme) {
         ReaderTheme.ARRECIFE -> Color(0xFFF8F9FA)
         ReaderTheme.CRETA -> Color(0xFFF4ECD8)
         ReaderTheme.PAPIRUS -> Color(0xFFD2D2D2)
         ReaderTheme.ABISAL -> Color(0xFF011627)
+        ReaderTheme.ONYX -> Color.Black
     }
 
     if (isLoading || publication == null) {
@@ -152,10 +166,12 @@ fun ReaderScreen(
                         initialPage = currentPage,
                         onPageChanged = progressUpdateHandler,
                         onTotalPagesReady = { totalPages = it },
-                        isVerticalMode = pub.isVerticalMode,
+                        isVerticalMode = isVerticalMode,
                         theme = readerTheme,
                         isSmartFitEnabled = isSmartFitEnabled,
                         isTextReflowEnabled = isTextReflowEnabled,
+                        isRtlEnabled = isRtlEnabled,
+                        isWebtoonMode = isWebtoonMode,
                         fontSize = fontSize,
                         fontFamily = fontFamily,
                         onCenterTap = {
@@ -293,7 +309,7 @@ fun ReaderScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                     Column(modifier = Modifier.weight(1f).padding(horizontal = 8.dp)) {
                         Text(pub.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(if (pub.isVerticalMode) "Vertical" else "Horizontal", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
+                        Text(if (isVerticalMode || isWebtoonMode) "Vertical" else "Horizontal", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.6f))
                     }
                     IconButton(onClick = { showChapterList = true; showControls = false }) {
                         Icon(Icons.Default.FormatListBulleted, "Chapters")
@@ -396,12 +412,38 @@ fun ReaderScreen(
                     scope.launch { preferencesManager.setReaderSettings(brightness = it) }
                 },
                 isSmartFitEnabled = isSmartFitEnabled,
-                onSmartFitChange = { isSmartFitEnabled = it },
+                onSmartFitChange = { enabled ->
+                    isSmartFitEnabled = enabled
+                    scope.launch(Dispatchers.IO) {
+                        dao.updateSmartFitEnabled(pub.id, enabled)
+                    }
+                },
                 isTextReflowEnabled = isTextReflowEnabled,
                 onTextReflowChange = { enabled ->
                     isTextReflowEnabled = enabled
                     scope.launch(Dispatchers.IO) {
                         dao.updateTextReflowEnabled(pub.id, enabled)
+                    }
+                },
+                isVerticalMode = isVerticalMode,
+                onVerticalModeChange = { enabled ->
+                    isVerticalMode = enabled
+                    scope.launch(Dispatchers.IO) {
+                        dao.updateVerticalMode(pub.id, enabled)
+                    }
+                },
+                isRtlEnabled = isRtlEnabled,
+                onRtlChange = { enabled ->
+                    isRtlEnabled = enabled
+                    scope.launch(Dispatchers.IO) {
+                        dao.updateRtlEnabled(pub.id, enabled)
+                    }
+                },
+                isWebtoonMode = isWebtoonMode,
+                onWebtoonChange = { enabled ->
+                    isWebtoonMode = enabled
+                    scope.launch(Dispatchers.IO) {
+                        dao.updateWebtoonMode(pub.id, enabled)
                     }
                 },
                 isPdf = pub.format == PublicationFormat.PDF
@@ -429,111 +471,395 @@ fun ReaderSettingsBottomPanel(
     onSmartFitChange: (Boolean) -> Unit = {},
     isTextReflowEnabled: Boolean = false,
     onTextReflowChange: (Boolean) -> Unit = {},
+    isVerticalMode: Boolean = false,
+    onVerticalModeChange: (Boolean) -> Unit = {},
+    isRtlEnabled: Boolean = false,
+    onRtlChange: (Boolean) -> Unit = {},
+    isWebtoonMode: Boolean = false,
+    onWebtoonChange: (Boolean) -> Unit = {},
     isPdf: Boolean = false
 ) {
+    val isDark = theme == ReaderTheme.ABISAL || theme == ReaderTheme.ONYX
+    val panelBg = when (theme) {
+        ReaderTheme.ARRECIFE -> Color(0xFFF8F9FA)
+        ReaderTheme.CRETA -> Color(0xFFF4ECD8)
+        ReaderTheme.PAPIRUS -> Color(0xFFD2D2D2)
+        ReaderTheme.ABISAL -> Color(0xFF011627)
+        ReaderTheme.ONYX -> Color.Black
+    }
+    val contentColor = if (isDark) Color.White else Color.Black
+
     Surface(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-        tonalElevation = 8.dp
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)),
+        color = panelBg.copy(alpha = 0.98f),
+        contentColor = contentColor,
+        tonalElevation = 12.dp
     ) {
-        Column(
-            modifier = Modifier
-                .padding(24.dp)
-                .navigationBarsPadding()
-        ) {
-            Text(
-                text = "Ajustes de Lectura",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
-            
-            if (isPdf) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Ajustar al ancho (Smart Fit)", style = MaterialTheme.typography.bodyMedium)
-                    Switch(checked = isSmartFitEnabled, onCheckedChange = onSmartFitChange)
+        AnimatedContent(
+            targetState = currentView,
+            transitionSpec = {
+                if (targetState == "advanced") {
+                    slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
+                } else {
+                    slideInHorizontally { -it } + fadeIn() togetherWith slideOutHorizontally { it } + fadeOut()
                 }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Modo Texto (Reflow)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                        Text("Extrae el texto para ajustar tamaño y fuentes", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Switch(checked = isTextReflowEnabled, onCheckedChange = onTextReflowChange)
-                }
-                HorizontalDivider(modifier = Modifier.padding(bottom = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
-            }
-
-            // THEME SELECTOR
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                ReaderThemeItem("Arrecife", Color(0xFFF8F9FA), theme == ReaderTheme.ARRECIFE) { onThemeChange(ReaderTheme.ARRECIFE) }
-                ReaderThemeItem("Creta", Color(0xFFF4ECD8), theme == ReaderTheme.CRETA) { onThemeChange(ReaderTheme.CRETA) }
-                ReaderThemeItem("Papirus", Color(0xFFD2D2D2), theme == ReaderTheme.PAPIRUS) { onThemeChange(ReaderTheme.PAPIRUS) }
-                ReaderThemeItem("Abisal", Color(0xFF011627), theme == ReaderTheme.ABISAL) { onThemeChange(ReaderTheme.ABISAL) }
-            }
-
-            if (!isPdf || isTextReflowEnabled) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
-
-                // FONT FAMILY
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("Serif", "Sans", "Mono").forEach { font ->
-                        FilterChip(
-                            selected = fontFamily == font,
-                            onClick = { onFontFamilyChange(font) },
-                            label = { Text(font) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-
-                // FONT SIZE
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.TextFields, "Small", Modifier.size(16.dp))
-                    Slider(value = fontSize, onValueChange = onFontSizeChange, valueRange = 60f..200f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
-                    Icon(Icons.Default.TextFields, "Large", Modifier.size(24.dp))
-                }
-
-                // LINE SPACING
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.FormatLineSpacing, "Spacing", Modifier.size(20.dp))
-                    Slider(value = lineSpacing, onValueChange = onLineSpacingChange, valueRange = 1.0f..2.5f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
-                    Text("${lineSpacing.toString().take(3)}x", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
-
-            // BRIGHTNESS
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.LightMode, "Brightness", Modifier.size(20.dp))
-                Slider(value = brightness, onValueChange = onBrightnessChange, valueRange = 0.1f..1.0f, modifier = Modifier.weight(1f).padding(horizontal = 12.dp))
-            }
-
+            },
+            label = "SettingsTransition"
+        ) { view ->
+            CompositionLocalProvider(LocalContentColor provides contentColor) {
+                when (view) {
+                "main" -> MainSettingsView(
+                    theme = theme,
+                    onThemeChange = onThemeChange,
+                    brightness = brightness,
+                    onBrightnessChange = onBrightnessChange,
+                    fontSize = fontSize,
+                    onFontSizeChange = onFontSizeChange,
+                    isVerticalMode = isVerticalMode,
+                    onVerticalModeChange = onVerticalModeChange,
+                    isRtlEnabled = isRtlEnabled,
+                    onRtlChange = onRtlChange,
+                    isWebtoonMode = isWebtoonMode,
+                    onWebtoonChange = onWebtoonChange,
+                    isPdf = isPdf,
+                    onNavigateToAdvanced = { currentView = "advanced" }
+                )
+                "advanced" -> AdvancedSettingsView(
+                    fontFamily = fontFamily,
+                    onFontFamilyChange = onFontFamilyChange,
+                    lineSpacing = lineSpacing,
+                    onLineSpacingChange = onLineSpacingChange,
+                    isSmartFitEnabled = isSmartFitEnabled,
+                    onSmartFitChange = onSmartFitChange,
+                    isTextReflowEnabled = isTextReflowEnabled,
+                    onTextReflowChange = onTextReflowChange,
+                    onBack = { currentView = "main" }
+                )
             }
         }
     }
-
+}
 
 @Composable
-fun ReaderThemeItem(name: String, color: Color, isSelected: Boolean, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { onClick() }) {
-        Box(
-            modifier = Modifier.size(50.dp).clip(RoundedCornerShape(12.dp)).background(color)
-                .then(if (isSelected) Modifier.background(Color.Blue.copy(alpha = 0.2f)) else Modifier)
-                .then(if (isSelected) Modifier.padding(2.dp).background(color, RoundedCornerShape(10.dp)) else Modifier)
-        )
-        Text(name, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
+fun MainSettingsView(
+    theme: ReaderTheme,
+    onThemeChange: (ReaderTheme) -> Unit,
+    brightness: Float,
+    onBrightnessChange: (Float) -> Unit,
+    fontSize: Float,
+    onFontSizeChange: (Float) -> Unit,
+    isVerticalMode: Boolean,
+    onVerticalModeChange: (Boolean) -> Unit,
+    isRtlEnabled: Boolean,
+    onRtlChange: (Boolean) -> Unit,
+    isWebtoonMode: Boolean,
+    onWebtoonChange: (Boolean) -> Unit,
+    isPdf: Boolean,
+    onNavigateToAdvanced: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .padding(24.dp)
+            .navigationBarsPadding(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(modifier = Modifier.size(40.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(Color.Gray.copy(alpha = 0.3f)))
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Reader Settings", style = MaterialTheme.typography.labelLarge, color = Color.Gray)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // THEME SELECTOR CARD
+        Surface(
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ReaderThemeCircle("Arrecife", Color(0xFFF8F9FA), theme == ReaderTheme.ARRECIFE) { onThemeChange(ReaderTheme.ARRECIFE) }
+                ReaderThemeCircle("Creta", Color(0xFFF4ECD8), theme == ReaderTheme.CRETA) { onThemeChange(ReaderTheme.CRETA) }
+                ReaderThemeCircle("Papirus", Color(0xFFD2D2D2), theme == ReaderTheme.PAPIRUS) { onThemeChange(ReaderTheme.PAPIRUS) }
+                ReaderThemeCircle("Abisal", Color(0xFF011627), theme == ReaderTheme.ABISAL) { onThemeChange(ReaderTheme.ABISAL) }
+                ReaderThemeCircle("Onyx", Color.Black, theme == ReaderTheme.ONYX) { onThemeChange(ReaderTheme.ONYX) }
+                
+                VerticalDivider(modifier = Modifier.height(30.dp).padding(horizontal = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
+                
+                // Voice Placeholder
+                IconButton(onClick = {}) {
+                    Icon(Icons.Default.GraphicEq, "Voice", tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            // TEXT CUSTOMIZE CARD
+            Surface(
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.weight(1.3f).height(160.dp).clickable { onNavigateToAdvanced() }
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                    Icon(Icons.Default.TextFields, null, modifier = Modifier.size(32.dp))
+                    Column {
+                        Text("Text", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("Customize", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    }
+                }
+            }
+
+            // SMALL ACTION CARDS COLUMN
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                SmallActionCard(Icons.Default.Search, "Search")
+                SmallActionCard(
+                    if (isVerticalMode || isWebtoonMode) Icons.Default.SwapVert else Icons.Default.SwapHoriz,
+                    "Orientation",
+                    active = true,
+                    onClick = { onVerticalModeChange(!isVerticalMode) }
+                )
+            }
+
+            // VERTICAL SLIDERS
+            Row(modifier = Modifier.weight(1.5f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                VerticalTouchSlider(
+                    value = fontSize,
+                    onValueChange = onFontSizeChange,
+                    valueRange = 60f..200f,
+                    icon = Icons.Default.FormatSize,
+                    label = "Size",
+                    modifier = Modifier.weight(1f)
+                )
+                VerticalTouchSlider(
+                    value = brightness,
+                    onValueChange = onBrightnessChange,
+                    valueRange = 0.1f..1.0f,
+                    icon = Icons.Default.LightMode,
+                    label = "Bright",
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+        
+        // Manga / Webtoon Mode Toggles for PDF
+        if (isPdf) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ChipToggle(isRtlEnabled, "Manga (RTL)", Icons.Default.MenuBook, Modifier.weight(1f)) { onRtlChange(it) }
+                ChipToggle(isWebtoonMode, "Webtoon", Icons.Default.HistoryEdu, Modifier.weight(1f)) { onWebtoonChange(it) }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+fun AdvancedSettingsView(
+    fontFamily: String,
+    onFontFamilyChange: (String) -> Unit,
+    lineSpacing: Float,
+    onLineSpacingChange: (Float) -> Unit,
+    isSmartFitEnabled: Boolean,
+    onSmartFitChange: (Boolean) -> Unit,
+    isTextReflowEnabled: Boolean,
+    onTextReflowChange: (Boolean) -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .padding(24.dp)
+            .navigationBarsPadding()
+    ) {
+        Text("Advanced Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // PREVIEW CARD
+        Surface(
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Preview", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                Text(
+                    "So we beat on, boats against the current, borne back ceaselessly into the past...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = contentColor,
+                    fontFamily = when(fontFamily) {
+                        "Serif" -> FontFamily.Serif
+                        "Sans" -> FontFamily.SansSerif
+                        "Mono" -> FontFamily.Monospace
+                        else -> FontFamily.Default
+                    },
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("Select Font", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            listOf("Serif", "Sans", "Mono").forEach { font ->
+                Surface(
+                    color = if (fontFamily == font) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.weight(1f).clickable { onFontFamilyChange(font) }
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Aa", fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = when(font) {
+                            "Serif" -> FontFamily.Serif
+                            "Sans" -> FontFamily.SansSerif
+                            "Mono" -> FontFamily.Monospace
+                            else -> FontFamily.Default
+                        })
+                        Text(font, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // Settings with Switches
+        AdvancedToggleRow("Smart Fit (Width)", isSmartFitEnabled) { onSmartFitChange(it) }
+        AdvancedToggleRow("Text Reflow", isTextReflowEnabled) { onTextReflowChange(it) }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        Button(
+            onClick = onBack,
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f), contentColor = MaterialTheme.colorScheme.onSurface)
+        ) {
+            Icon(Icons.Default.KeyboardArrowDown, null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Back")
+        }
+    }
+}
+
+@Composable
+fun ReaderThemeCircle(name: String, color: Color, isSelected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(color)
+            .clickable { onClick() }
+            .then(if (isSelected) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)) else Modifier)
+            .then(if (isSelected) Modifier.padding(4.dp).background(color, androidx.compose.foundation.shape.CircleShape) else Modifier)
+    )
+}
+
+@Composable
+fun SmallActionCard(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, active: Boolean = false, onClick: () -> Unit = {}) {
+    Surface(
+        color = if (active) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().height(72.dp).clickable { onClick() }
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, label, modifier = Modifier.size(24.dp), tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+fun VerticalTouchSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    
+    Surface(
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+        shape = RoundedCornerShape(24.dp),
+        modifier = modifier
+            .height(160.dp)
+            .pointerInput(valueRange) {
+                detectTapGestures { offset ->
+                    val ratio = 1f - (offset.y / size.height).coerceIn(0f, 1f)
+                    val newValue = valueRange.start + (valueRange.endInclusive - valueRange.start) * ratio
+                    onValueChange(newValue)
+                }
+            }
+            .pointerInput(valueRange) {
+                detectDragGestures { change, _ ->
+                    val ratio = 1f - (change.position.y / size.height).coerceIn(0f, 1f)
+                    val newValue = valueRange.start + (valueRange.endInclusive - valueRange.start) * ratio
+                    onValueChange(newValue)
+                }
+            }
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Icon(icon, null, modifier = Modifier.size(20.dp), tint = Color.Gray)
+            
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .width(12.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color.Gray.copy(alpha = 0.1f))
+            ) {
+                val progress = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(progress)
+                        .align(Alignment.BottomCenter)
+                        .background(MaterialTheme.colorScheme.primary)
+                )
+            }
+            
+            Text(label, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = Color.Gray)
+        }
+    }
+}
+
+@Composable
+fun ChipToggle(selected: Boolean, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier, onToggle: (Boolean) -> Unit) {
+    Surface(
+        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.clickable { onToggle(!selected) }
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, modifier = Modifier.size(16.dp), tint = if (selected) MaterialTheme.colorScheme.primary else Color.Gray)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+fun AdvancedToggleRow(label: String, selected: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Switch(checked = selected, onCheckedChange = onToggle)
     }
 }

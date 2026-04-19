@@ -22,7 +22,10 @@ data class Publication(
     val lastRead: Long = System.currentTimeMillis(),
     val dateAdded: Long = System.currentTimeMillis(),
     val isVerticalMode: Boolean = false,
-    val isTextReflowEnabled: Boolean = false
+    val isTextReflowEnabled: Boolean = false,
+    val isRtlEnabled: Boolean = false,
+    val isWebtoonMode: Boolean = false,
+    val isSmartFitEnabled: Boolean = false
 ) {
     val progress: Float
         get() = if (totalPages > 0) currentPosition.toFloat() / totalPages else 0f

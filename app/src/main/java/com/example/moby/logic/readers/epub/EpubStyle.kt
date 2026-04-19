@@ -8,6 +8,7 @@ fun ReaderTheme.toColor() = when (this) {
     ReaderTheme.CRETA    -> Color(0xFFF4ECD8)
     ReaderTheme.PAPIRUS  -> Color(0xFFD2D2D2)
     ReaderTheme.ABISAL   -> Color(0xFF011627)
+    ReaderTheme.ONYX     -> Color.Black
 }
 
 fun ReaderTheme.toBgHex() = when (this) {
@@ -15,6 +16,7 @@ fun ReaderTheme.toBgHex() = when (this) {
     ReaderTheme.CRETA    -> "#F4ECD8"
     ReaderTheme.PAPIRUS  -> "#D2D2D2"
     ReaderTheme.ABISAL   -> "#011627"
+    ReaderTheme.ONYX     -> "#000000"
 }
 
 fun ReaderTheme.toTextHex() = when (this) {
@@ -22,6 +24,7 @@ fun ReaderTheme.toTextHex() = when (this) {
     ReaderTheme.CRETA    -> "#423425"
     ReaderTheme.PAPIRUS  -> "#1A1A1A"
     ReaderTheme.ABISAL   -> "#D0D0D0"
+    ReaderTheme.ONYX     -> "#FFFFFF"
 }
 
 fun ReaderTheme.toLinkHex() = when (this) {

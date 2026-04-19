@@ -31,6 +31,18 @@ interface PublicationDao {
     @Query("UPDATE publications SET isTextReflowEnabled = :enabled WHERE id = :pubId")
     suspend fun updateTextReflowEnabled(pubId: String, enabled: Boolean)
 
+    @Query("UPDATE publications SET isVerticalMode = :enabled WHERE id = :pubId")
+    suspend fun updateVerticalMode(pubId: String, enabled: Boolean)
+
+    @Query("UPDATE publications SET isRtlEnabled = :enabled WHERE id = :pubId")
+    suspend fun updateRtlEnabled(pubId: String, enabled: Boolean)
+
+    @Query("UPDATE publications SET isWebtoonMode = :enabled WHERE id = :pubId")
+    suspend fun updateWebtoonMode(pubId: String, enabled: Boolean)
+
+    @Query("UPDATE publications SET isSmartFitEnabled = :enabled WHERE id = :pubId")
+    suspend fun updateSmartFitEnabled(pubId: String, enabled: Boolean)
+
     @Query("DELETE FROM publications")
     suspend fun deleteAllPublications()
 
