@@ -14,7 +14,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.moby.models.BookAnnotation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -84,24 +89,17 @@ fun EpubReaderComponent(
     val scope = rememberCoroutineScope()
     var virtualPageIndex by remember { mutableIntStateOf(initialVirtualPage) }
     val chapterPageCounts = remember { mutableStateMapOf<Int, Int>() }
-    val totalBookPages = remember(chapterPageCounts.size) { chapters.indices.sumOf { chapterPageCounts[it] ?: 0 } }
-    var landOnLastPage by remember { mutableStateOf(false) }
+    val totalBookPages by remember { derivedStateOf { chapters.indices.sumOf { chapterPageCounts[it] ?: 0 } } }
+    var previousChapter by remember { mutableIntStateOf(initialChapter) }
     var isFirstLoad by remember { mutableStateOf(true) }
+    var isNavigating by remember { mutableStateOf(false) }
 
     LaunchedEffect(pagerState.currentPage, virtualPageIndex, totalBookPages) {
-        delay(600)
-        val globalPage = (0 until pagerState.currentPage).sumOf { chapterPageCounts[it] ?: 0 } + (virtualPageIndex + 1)
-        onVirtualPageChanged(globalPage, totalBookPages)
-    }
-
-    LaunchedEffect(pagerState.currentPage) {
-        if (isFirstLoad) {
-            // Primera carga: conserva initialVirtualPage para restaurar posición guardada
-            isFirstLoad = false
-        } else {
-            if (!landOnLastPage) virtualPageIndex = 0
+        delay(300)
+        if (virtualPageIndex >= 0) {
+            val globalPage = (0 until pagerState.currentPage).sumOf { chapterPageCounts[it] ?: 0 } + (virtualPageIndex + 1)
+            onVirtualPageChanged(globalPage, totalBookPages)
         }
-        onChapterChanged(pagerState.currentPage)
     }
 
     LaunchedEffect(initialChapter) {
@@ -109,62 +107,92 @@ fun EpubReaderComponent(
         if (pagerState.currentPage != target) pagerState.scrollToPage(target)
     }
 
-    // Guarda posición codificada: (capítulo+1)*10000 + paginaVirtual
-    // Retrocompatible — valores guardados anteriores son < 10000
     LaunchedEffect(pagerState.currentPage, virtualPageIndex) {
-        delay(500)
-        val encoded = (pagerState.currentPage + 1) * 10000 + virtualPageIndex
-        dao.updatePublicationPosition(publicationId, encoded)
+        if (!isFirstLoad && virtualPageIndex >= 0) {
+            val encoded = (pagerState.currentPage + 1) * 10000 + virtualPageIndex
+            onChapterChanged(encoded)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        delay(200)
+        isFirstLoad = false
+    }
+
+    LaunchedEffect(pagerState.currentPage) {
+        if (!isFirstLoad) {
+            if (pagerState.currentPage < previousChapter) {
+                virtualPageIndex = -1
+            } else if (pagerState.currentPage > previousChapter) {
+                virtualPageIndex = 0
+            }
+        }
+        previousChapter = pagerState.currentPage
     }
 
     val bg = theme.toColor()
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().background(bg)) {
         HorizontalPager(
             state = pagerState,
             userScrollEnabled = false,
-            modifier = Modifier.fillMaxSize().background(bg),
-            beyondViewportPageCount = 0
+            modifier = Modifier.fillMaxSize(),
+            beyondViewportPageCount = 1
         ) { page ->
-            val offset = (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
-            Box(modifier = Modifier.fillMaxSize().graphicsLayer {
-                val abs = offset.absoluteValue.coerceIn(0f, 1f)
-                scaleX = lerp(0.88f, 1f, 1f - abs); scaleY = lerp(0.88f, 1f, 1f - abs); alpha = lerp(0.5f, 1f, 1f - abs)
-            }) {
-                EpubChapterRender(
-                    publicationId = publicationId, dao = dao, filePath = filePath,
-                    internalPath = opfDir + android.net.Uri.decode(chapters[page]),
-                    theme = theme, fontSize = fontSize, fontFamily = fontFamily, lineSpacing = lineSpacing,
-                    isVerticalMode = isVerticalMode,
-                    // -1 indica "ir a la última página" de forma segura controlada por JS
-                    virtualPageIndex = if (page == pagerState.currentPage) {
-                        if (landOnLastPage) -1 else virtualPageIndex
-                    } else 0,
-                    onChapterBoundary = { reachedEnd ->
-                        if (reachedEnd) {
-                            if (pagerState.currentPage < chapters.size - 1) {
-                                landOnLastPage = false
-                                virtualPageIndex = 0
-                                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-                            }
-                        } else {
-                            if (pagerState.currentPage > 0) {
-                                landOnLastPage = true
-                                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-                            }
-                        }
-                    },
-                    onVirtualPageIndexChanged = { idx -> 
-                        if (page == pagerState.currentPage) {
-                            virtualPageIndex = idx
-                            if (landOnLastPage) landOnLastPage = false
-                        }
-                    },
-                    onCenterTap = onCenterTap,
-                    onVirtualPageCountReady = { count ->
-                        chapterPageCounts[page] = count
+            EpubChapterRender(
+                publicationId = publicationId,
+                dao = dao,
+                filePath = filePath,
+                internalPath = opfDir + android.net.Uri.decode(chapters[page]),
+                theme = theme,
+                fontSize = fontSize,
+                fontFamily = fontFamily,
+                lineSpacing = lineSpacing,
+                isVerticalMode = isVerticalMode,
+                virtualPageIndex = if (page == pagerState.currentPage) {
+                    virtualPageIndex
+                } else if (page < pagerState.currentPage) {
+                    -1
+                } else {
+                    0
+                },
+                onVirtualPageCountReady = { count ->
+                    chapterPageCounts[page] = count
+                },
+                onVirtualPageIndexChanged = { idx ->
+                    if (page == pagerState.currentPage) {
+                        virtualPageIndex = idx
                     }
-                )
-            }
+                },
+                onChapterBoundary = { reachedEnd ->
+                    if (!isNavigating) {
+                        if (reachedEnd && pagerState.currentPage < chapters.size - 1) {
+                            scope.launch {
+                                try {
+                                    isNavigating = true
+                                    virtualPageIndex = 0
+                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                                    delay(400)
+                                } finally {
+                                    isNavigating = false
+                                }
+                            }
+                        } else if (!reachedEnd && pagerState.currentPage > 0) {
+                            scope.launch {
+                                try {
+                                    isNavigating = true
+                                    virtualPageIndex = -1
+                                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                                    delay(400)
+                                } finally {
+                                    isNavigating = false
+                                }
+                            }
+                        }
+                    }
+                },
+                onCenterTap = onCenterTap,
+                chapterTotalPages = chapterPageCounts[page] ?: 1
+            )
         }
     }
 }
@@ -184,16 +212,40 @@ fun EpubChapterRender(
     onChapterBoundary: (Boolean) -> Unit,
     onVirtualPageIndexChanged: (Int) -> Unit,
     onCenterTap: () -> Unit,
-    onVirtualPageCountReady: (Int) -> Unit
+    onVirtualPageCountReady: (Int) -> Unit,
+    chapterTotalPages: Int
 ) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val density = LocalDensity.current
+    
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
     var rawBody by remember { mutableStateOf<String?>(null) }
     var isPageReady by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    // SELECTION STATE
+    var showSelectionPopup by remember { mutableStateOf(false) }
+    var selectionText by remember { mutableStateOf("") }
+    var selectionCfi by remember { mutableStateOf("") }
+    var selectionX by remember { mutableFloatStateOf(0f) }
+    var selectionY by remember { mutableFloatStateOf(0f) }
+
+    // Load annotations for this chapter to apply them on page load
+    val annotations = remember(publicationId, internalPath) { 
+        mutableStateListOf<BookAnnotation>() 
+    }
+
+    LaunchedEffect(publicationId, internalPath) {
+        val list = dao.getAnnotationsForChapter(publicationId, internalPath)
+        annotations.clear()
+        annotations.addAll(list)
+    }
+
     LaunchedEffect(internalPath) {
         isPageReady = false
         rawBody = null
+        showSelectionPopup = false
         withContext(Dispatchers.IO) {
             try {
                 val zip = ZipFile(File(filePath))
@@ -219,9 +271,19 @@ fun EpubChapterRender(
                 r.style.setProperty('--moby-font', '$fontStack');
                 r.style.setProperty('--moby-size', '${fontSize.toInt()}%');
                 r.style.setProperty('--moby-spacing', '$lineSpacing');
-                setTimeout(function() { mobyMeasure(); mobySync(); }, 150);
+                setTimeout(function() { mobyMeasure(); mobySync(); }, 80);
             })();
         """.trimIndent(), null)
+    }
+
+    // Apply saved highlights when page is ready
+    LaunchedEffect(isPageReady, annotations.size) {
+        if (isPageReady) {
+            val view = webViewRef.value ?: return@LaunchedEffect
+            annotations.forEach { ann ->
+                view.evaluateJavascript("mobyApplyHighlight(`${ann.cfiInfo}`, '');", null)
+            }
+        }
     }
 
     val bg = theme.toColor()
@@ -235,13 +297,40 @@ fun EpubChapterRender(
                     WebView(ctx).apply {
                         layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        settings.apply { javaScriptEnabled = true; domStorageEnabled = true; allowContentAccess = true; allowFileAccess = false; textZoom = 100 }
-                        addJavascriptInterface(object : Any() {
-                            @android.webkit.JavascriptInterface fun onPageCountReady(count: Int) { scope.launch(Dispatchers.Main) { onVirtualPageCountReady(count) } }
-                            @android.webkit.JavascriptInterface fun onChapterBoundary(reachedEnd: Boolean) { scope.launch(Dispatchers.Main) { onChapterBoundary(reachedEnd) } }
-                            @android.webkit.JavascriptInterface fun onTapCenter() { scope.launch(Dispatchers.Main) { onCenterTap() } }
-                            @android.webkit.JavascriptInterface fun onVirtualPageIndexChanged(idx: Int) { scope.launch(Dispatchers.Main) { onVirtualPageIndexChanged(idx) } }
-                        }, "mobyBridge")
+                        settings.apply { 
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            allowContentAccess = true
+                            allowFileAccess = false
+                            textZoom = 100
+                            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        }
+                        isHapticFeedbackEnabled = false
+                        
+                        val bridge = EpubJavascriptBridge(
+                            scope = scope,
+                            onVirtualPageCountReady = onVirtualPageCountReady,
+                            onVirtualPageIndexChanged = onVirtualPageIndexChanged,
+                            onChapterBoundary = onChapterBoundary,
+                            onTextSelectedRaw = { text, cfi, x, y, w, h ->
+                                selectionText = text
+                                selectionCfi = cfi
+                                selectionX = x
+                                selectionY = y
+                                showSelectionPopup = true
+                            },
+                            onSelectionClearedRaw = {
+                                showSelectionPopup = false
+                            },
+                            onCenterTap = onCenterTap
+                        )
+                        addJavascriptInterface(bridge, "mobyBridge")
+
+                        setOnTouchListener { v, event ->
+                            v.parent.requestDisallowInterceptTouchEvent(true)
+                            false
+                        }
+
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 isPageReady = true
@@ -266,11 +355,60 @@ fun EpubChapterRender(
                         isPageReady = false
                         val html = EpubHtmlContent.build(rawBody!!, theme, fontSize, fontFamily, lineSpacing, isVerticalMode, virtualPageIndex)
                         view.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null)
+                    } else if (isPageReady) {
+                        view.evaluateJavascript("""
+                            if ($virtualPageIndex === -1) {
+                                __mobyTarget = Math.max(0, __mobyCount - 1);
+                                mobySync();
+                                if (window.mobyBridge && window.mobyBridge.onVirtualPageIndexChanged) {
+                                    window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
+                                }
+                            } else if (window.__mobyTarget !== $virtualPageIndex) {
+                                __mobyTarget = $virtualPageIndex;
+                                mobySync();
+                            }
+                        """.trimIndent(), null)
                     }
                 }
             )
         } else {
             CircularProgressIndicator(color = theme.toTextHex().let { android.graphics.Color.parseColor(it) }.let { androidx.compose.ui.graphics.Color(it) })
+        }
+
+        // SELECTION POPUP
+        if (showSelectionPopup) {
+            EpubSelectionPopup(
+                xdp = selectionX,
+                ydp = selectionY,
+                selectedText = selectionText,
+                onHighlight = { color ->
+                    val annotation = BookAnnotation(
+                        publicationId = publicationId,
+                        chapterPath = internalPath,
+                        cfiInfo = selectionCfi,
+                        selectedText = selectionText,
+                        colorHex = color
+                    )
+                    scope.launch(Dispatchers.IO) {
+                        dao.insertAnnotation(annotation)
+                        withContext(Dispatchers.Main) {
+                            annotations.add(annotation)
+                            webViewRef.value?.evaluateJavascript("mobyApplyHighlight(`${selectionCfi}`, '');", null)
+                            webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
+                            showSelectionPopup = false
+                        }
+                    }
+                },
+                onCopy = {
+                    clipboardManager.setText(AnnotatedString(selectionText))
+                    webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
+                    showSelectionPopup = false
+                },
+                onDismiss = {
+                    webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
+                    showSelectionPopup = false
+                }
+            )
         }
     }
 }

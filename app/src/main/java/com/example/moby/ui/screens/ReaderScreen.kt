@@ -345,26 +345,43 @@ fun ReaderScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val isEpub = pub.format == PublicationFormat.EPUB
+                        val decodedPage = if (isEpub && currentPage >= 10000) (currentPage / 10000) - 1 else currentPage
+                        val displayLabel = if (isEpub) "Cap. ${decodedPage + 1}" else "Pág. ${decodedPage + 1}"
+                        
+                        val progressPercent = if (isEpub) {
+                            if (virtualPageCount > 10) {
+                                ((virtualPageIndex.toFloat() / virtualPageCount) * 100).toInt().coerceIn(0, 100)
+                            } else {
+                                if (totalPages > 0) ((decodedPage.toFloat() / totalPages) * 100).toInt().coerceIn(0, 100) else 0
+                            }
+                        } else {
+                            if (totalPages > 1) ((currentPage.toFloat() / (totalPages - 1)) * 100).toInt().coerceIn(0, 100) else 0
+                        }
+
                         Text(
-                            text = if (pub.format == PublicationFormat.EPUB) "Cap. ${currentPage + 1}" else "Pág. ${currentPage + 1}",
+                            text = displayLabel,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "${((currentPage.toFloat() / (totalPages - 1).coerceAtLeast(1)) * 100).toInt()}%",
+                            text = "$progressPercent%",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color.White.copy(alpha = 0.6f)
                         )
                         Text(
-                            text = "$totalPages",
+                            text = if (isEpub) "$totalPages Cap" else "$totalPages Pág",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     
                     Slider(
-                        value = currentPage.toFloat(),
-                        onValueChange = { progressUpdateHandler(it.toInt()) },
+                        value = (if (pub.format == PublicationFormat.EPUB && currentPage >= 10000) (currentPage / 10000) - 1 else currentPage).toFloat(),
+                        onValueChange = { 
+                            // En EPUB, el slider navega por capítulos
+                            progressUpdateHandler(it.toInt()) 
+                        },
                         valueRange = 0f..maxOf(1f, (totalPages - 1).toFloat()),
                         steps = if (totalPages in 2..50) totalPages - 2 else 0,
                         modifier = Modifier.fillMaxWidth(),
@@ -449,9 +466,6 @@ fun ReaderScreen(
                 isPdf = pub.format == PublicationFormat.PDF
             )
         }
-
-        
-
     }
 }
 
@@ -479,6 +493,7 @@ fun ReaderSettingsBottomPanel(
     onWebtoonChange: (Boolean) -> Unit = {},
     isPdf: Boolean = false
 ) {
+    var currentView by remember { mutableStateOf("main") }
     val isDark = theme == ReaderTheme.ABISAL || theme == ReaderTheme.ONYX
     val panelBg = when (theme) {
         ReaderTheme.ARRECIFE -> Color(0xFFF8F9FA)
@@ -510,33 +525,35 @@ fun ReaderSettingsBottomPanel(
         ) { view ->
             CompositionLocalProvider(LocalContentColor provides contentColor) {
                 when (view) {
-                "main" -> MainSettingsView(
-                    theme = theme,
-                    onThemeChange = onThemeChange,
-                    brightness = brightness,
-                    onBrightnessChange = onBrightnessChange,
-                    fontSize = fontSize,
-                    onFontSizeChange = onFontSizeChange,
-                    isVerticalMode = isVerticalMode,
-                    onVerticalModeChange = onVerticalModeChange,
-                    isRtlEnabled = isRtlEnabled,
-                    onRtlChange = onRtlChange,
-                    isWebtoonMode = isWebtoonMode,
-                    onWebtoonChange = onWebtoonChange,
-                    isPdf = isPdf,
-                    onNavigateToAdvanced = { currentView = "advanced" }
-                )
-                "advanced" -> AdvancedSettingsView(
-                    fontFamily = fontFamily,
-                    onFontFamilyChange = onFontFamilyChange,
-                    lineSpacing = lineSpacing,
-                    onLineSpacingChange = onLineSpacingChange,
-                    isSmartFitEnabled = isSmartFitEnabled,
-                    onSmartFitChange = onSmartFitChange,
-                    isTextReflowEnabled = isTextReflowEnabled,
-                    onTextReflowChange = onTextReflowChange,
-                    onBack = { currentView = "main" }
-                )
+                    "main" -> MainSettingsView(
+                        theme = theme,
+                        onThemeChange = onThemeChange,
+                        brightness = brightness,
+                        onBrightnessChange = onBrightnessChange,
+                        fontSize = fontSize,
+                        onFontSizeChange = onFontSizeChange,
+                        isVerticalMode = isVerticalMode,
+                        onVerticalModeChange = onVerticalModeChange,
+                        isRtlEnabled = isRtlEnabled,
+                        onRtlChange = onRtlChange,
+                        isWebtoonMode = isWebtoonMode,
+                        onWebtoonChange = onWebtoonChange,
+                        isPdf = isPdf,
+                        onNavigateToAdvanced = { currentView = "advanced" }
+                    )
+                    "advanced" -> AdvancedSettingsView(
+                        fontFamily = fontFamily,
+                        onFontFamilyChange = onFontFamilyChange,
+                        lineSpacing = lineSpacing,
+                        onLineSpacingChange = onLineSpacingChange,
+                        isSmartFitEnabled = isSmartFitEnabled,
+                        onSmartFitChange = onSmartFitChange,
+                        isTextReflowEnabled = isTextReflowEnabled,
+                        onTextReflowChange = onTextReflowChange,
+                        onBack = { currentView = "main" },
+                        contentColor = contentColor
+                    )
+                }
             }
         }
     }
@@ -669,7 +686,8 @@ fun AdvancedSettingsView(
     onSmartFitChange: (Boolean) -> Unit,
     isTextReflowEnabled: Boolean,
     onTextReflowChange: (Boolean) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    contentColor: Color
 ) {
     Column(
         modifier = Modifier
@@ -782,8 +800,6 @@ fun VerticalTouchSlider(
     label: String,
     modifier: Modifier = Modifier
 ) {
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    
     Surface(
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
         shape = RoundedCornerShape(24.dp),

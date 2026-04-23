@@ -69,6 +69,19 @@ object EpubHtmlContent {
             img, svg { max-width: 100% !important; height: auto !important; display: block !important; margin: 10px auto !important; }
             p   { margin: 0 0 1em 0 !important; text-align: justify !important; }
             a   { color: var(--moby-link) !important; text-decoration: none !important; }
+            .moby-highlight {
+                background-color: #FFF59D;
+                color: inherit;
+                border-radius: 2px;
+                padding: 1px 0;
+            }
+            .moby-highlight.green { background-color: #A5D6A7; }
+            .moby-highlight.blue  { background-color: #90CAF9; }
+            .moby-highlight.pink  { background-color: #F48FB1; }
+            
+            ::selection {
+                background: rgba(126, 200, 227, 0.3);
+            }
         """.trimIndent()
     }
 
@@ -79,22 +92,36 @@ object EpubHtmlContent {
             var __mobyCount    = 1;
             var __mobyVertical = $isVerticalMode;
             var __mobySyncLock = false;
+            var __mobyBoundaryLock = false;
+
+            function mobyFireBoundary(reachedEnd) {
+                if (__mobyBoundaryLock) return;
+                __mobyBoundaryLock = true;
+                if (window.mobyBridge) window.mobyBridge.onChapterBoundary(reachedEnd ? "true" : "false");
+                setTimeout(function(){ __mobyBoundaryLock = false; }, 300);
+            }
 
             function mobyMeasure() {
                 var w = window.innerWidth || document.documentElement.clientWidth || 0;
                 if (w <= 0) return false;
                 __mobyW = w;
                 var el = document.getElementById('moby-columns');
-                if (el) {
-                    __mobyCount = Math.max(1, Math.ceil(el.scrollWidth / w));
-                    if (window.mobyBridge) {
-                        window.mobyBridge.onPageCountReady(__mobyCount);
-                        // Sincronizar el target real si era -1
-                        if (__mobyTarget === -1) {
-                            __mobyTarget = __mobyCount - 1;
-                            if (window.mobyBridge.onVirtualPageIndexChanged) {
-                                window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
-                            }
+                if (!el) return false;
+
+                // Forzar reflow antes de leer scrollWidth
+                el.style.display = 'none';
+                el.offsetHeight; // trigger reflow
+                el.style.display = '';
+
+                var scrollW = el.scrollWidth;
+                __mobyCount = Math.max(1, Math.round(scrollW / w));  // round en vez de ceil
+
+                if (window.mobyBridge) {
+                    window.mobyBridge.onPageCountReady(__mobyCount);
+                    if (__mobyTarget === -1) {
+                        __mobyTarget = __mobyCount - 1;
+                        if (window.mobyBridge.onVirtualPageIndexChanged) {
+                            window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
                         }
                     }
                 }
@@ -111,7 +138,7 @@ object EpubHtmlContent {
 
             function mobyNext() {
                 if (__mobyVertical) {
-                    if (window.mobyBridge) window.mobyBridge.onChapterBoundary(true);
+                    mobyFireBoundary(true);
                     return;
                 }
                 mobyMeasure();
@@ -122,13 +149,13 @@ object EpubHtmlContent {
                         window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
                     }
                 } else {
-                    if (window.mobyBridge) window.mobyBridge.onChapterBoundary(true);
+                    mobyFireBoundary(true);
                 }
             }
 
             function mobyPrev() {
                 if (__mobyVertical) {
-                    if (window.mobyBridge) window.mobyBridge.onChapterBoundary(false);
+                    mobyFireBoundary(false);
                     return;
                 }
                 if (__mobyTarget > 0) {
@@ -138,30 +165,151 @@ object EpubHtmlContent {
                         window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
                     }
                 } else {
-                    if (window.mobyBridge) window.mobyBridge.onChapterBoundary(false);
+                    mobyFireBoundary(false);
                 }
             }
 
             function mobyInit(targetPage) {
                 __mobyTarget = targetPage;
-                mobySync();
-                // Re-sync después de un breve delay por si el renderizado cambió el ancho
-                setTimeout(mobySync, 150);
+
+                // Esperar a que las columnas CSS estén listas
+                function tryInit(attemptsLeft) {
+                    var el = document.getElementById('moby-columns');
+                    if (!el) { 
+                        if (attemptsLeft > 0) setTimeout(function(){ tryInit(attemptsLeft - 1); }, 30);
+                        return; 
+                    }
+
+                    var w = window.innerWidth || 0;
+                    var scrollW = el.scrollWidth;
+
+                    // Si scrollWidth aún no está listo, reintentar
+                    if (scrollW <= w + 5 && scrollW > 0) {
+                        // scrollWidth parece correcto, proceder
+                    } else if (attemptsLeft > 0) {
+                        setTimeout(function(){ tryInit(attemptsLeft - 1); }, 30);
+                        return;
+                    }
+
+                    mobyMeasure();
+                    mobySync();
+                }
+
+                // Primer intento inmediato, hasta 10 reintentos cada 30ms = 300ms máx
+                tryInit(10);
+            }
+
+            function mobyApplyHighlight(cfi, colorClass) {
+                // Simplified highlight: we find the range by text and context if CFI is just text
+                // In a real app we'd use a more robust range-serialization.
+                // For now, we'll implement a basic one using window.find or similar if needed,
+                // but let's try a wrapping method.
+                try {
+                    const range = mobyDeserializeRange(cfi);
+                    if (range) {
+                        const mark = document.createElement('mark');
+                        mark.className = 'moby-highlight ' + (colorClass || '');
+                        range.surroundContents(mark);
+                    }
+                } catch(e) { console.error("Highlight error", e); }
+            }
+
+            function mobySerializeRange(range) {
+                // Basic representation: parent path + offsets
+                function getPath(node) {
+                    if (node.id) return '#' + node.id;
+                    if (node === document.body) return 'body';
+                    var index = 1;
+                    var sibling = node.previousSibling;
+                    while (sibling) {
+                        if (sibling.nodeType === 1 && sibling.tagName === node.tagName) index++;
+                        sibling = sibling.previousSibling;
+                    }
+                    return getPath(node.parentNode) + " > " + node.tagName + ":nth-of-type(" + index + ")";
+                }
+                return JSON.stringify({
+                    startPath: getPath(range.startContainer),
+                    startOffset: range.startOffset,
+                    endPath: getPath(range.endContainer),
+                    endOffset: range.endOffset
+                });
+            }
+
+            function mobyDeserializeRange(cfi) {
+                try {
+                    const data = JSON.parse(cfi);
+                    const range = document.createRange();
+                    const startNode = document.querySelector(data.startPath).childNodes[0] || document.querySelector(data.startPath);
+                    const endNode = document.querySelector(data.endPath).childNodes[0] || document.querySelector(data.endPath);
+                    range.setStart(startNode, data.startOffset);
+                    range.setEnd(endNode, data.endOffset);
+                    return range;
+                } catch(e) { return null; }
             }
 
             (function() {
                 var tsX = 0, tsY = 0;
-                document.addEventListener('touchstart', function(e){ tsX = e.changedTouches[0].clientX; tsY = e.changedTouches[0].clientY; }, {passive: true});
-                document.addEventListener('touchend', function(e){
-                    if (window.getSelection && window.getSelection().toString().length > 0) return;
-                    var teX = e.changedTouches[0].clientX; var teY = e.changedTouches[0].clientY;
-                    if (Math.abs(teX - tsX) < 15 && Math.abs(teY - tsY) < 15) {
-                        var w = window.innerWidth;
-                        if (teX < w * 0.25) mobyPrev();
-                        else if (teX > w * 0.75) mobyNext();
-                        else if (window.mobyBridge) window.mobyBridge.onTapCenter();
+                var hasMoved = false;
+
+                document.addEventListener('touchstart', function(e){ 
+                    tsX = e.changedTouches[0].clientX; 
+                    tsY = e.changedTouches[0].clientY; 
+                    hasMoved = false;
+                }, {passive: true});
+
+                document.addEventListener('selectionchange', function() {
+                    const selection = window.getSelection();
+                    if (selection.rangeCount > 0 && selection.toString().length > 0) {
+                        const range = selection.getRangeAt(0);
+                        const rect = range.getBoundingClientRect();
+                        const cfi = mobySerializeRange(range);
+                        if (window.mobyBridge && window.mobyBridge.onTextSelected) {
+                            window.mobyBridge.onTextSelected(selection.toString(), cfi, rect.top, rect.left, rect.width, rect.height);
+                        }
+                    } else {
+                        if (window.mobyBridge && window.mobyBridge.onSelectionCleared) {
+                            window.mobyBridge.onSelectionCleared();
+                        }
+                    }
+                });
+
+                document.addEventListener('touchmove', function(e){
+                    var tmX = e.changedTouches[0].clientX;
+                    var tmY = e.changedTouches[0].clientY;
+                    var dx = tmX - tsX;
+                    var dy = tmY - tsY;
+                    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) hasMoved = true;
+                    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10 && e.cancelable) {
+                        e.preventDefault(); // Prevent WebView from natively scrolling and firing touchcancel
                     }
                 }, {passive: false});
+
+                document.addEventListener('touchend', function(e){
+                    var teX = e.changedTouches[0].clientX; 
+                    var teY = e.changedTouches[0].clientY;
+                    var dx = teX - tsX;
+                    var dy = teY - tsY;
+
+                    // 1. Detect Swipe (Horizontal) - 20px threshold for better responsiveness
+                    if (Math.abs(dx) > 20 && Math.abs(dy) < 80) {
+                        window.getSelection().removeAllRanges();
+                        if (dx < 0) mobyNext();
+                        else mobyPrev();
+                        return;
+                    }
+
+                    // 2. Detect Tap (if not moved much)
+                    if (!hasMoved || (Math.abs(dx) < 10 && Math.abs(dy) < 10)) {
+                        var w = window.innerWidth;
+                        if (teX < w * 0.20) {
+                            mobyPrev();
+                        } else if (teX > w * 0.80) {
+                            mobyNext();
+                        } else {
+                            if (window.mobyBridge) window.mobyBridge.onTapCenter();
+                        }
+                    }
+                }, {passive: true});
             })();
             
             window.onload = function() { mobyInit(__mobyTarget); };
