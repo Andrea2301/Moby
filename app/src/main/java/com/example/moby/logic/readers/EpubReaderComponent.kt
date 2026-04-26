@@ -104,7 +104,9 @@ fun EpubReaderComponent(
 
     LaunchedEffect(initialChapter) {
         val target = initialChapter.coerceIn(0, chapters.size - 1)
-        if (pagerState.currentPage != target) pagerState.scrollToPage(target)
+        if (pagerState.currentPage != target) {
+            pagerState.scrollToPage(target)
+        }
     }
 
     LaunchedEffect(pagerState.currentPage, virtualPageIndex) {
@@ -334,7 +336,6 @@ fun EpubChapterRender(
                         webViewClient = object : WebViewClient() {
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 isPageReady = true
-                                view?.evaluateJavascript("mobyInit($virtualPageIndex);", null)
                             }
                             override fun shouldInterceptRequest(view: WebView?, request: android.webkit.WebResourceRequest?): android.webkit.WebResourceResponse? {
                                 val uri = request?.url ?: return null
@@ -360,8 +361,8 @@ fun EpubChapterRender(
                             if ($virtualPageIndex === -1) {
                                 __mobyTarget = Math.max(0, __mobyCount - 1);
                                 mobySync();
-                                if (window.mobyBridge && window.mobyBridge.onVirtualPageIndexChanged) {
-                                    window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget);
+                                if (window.mobyBridge) {
+                                    window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget.toString());
                                 }
                             } else if (window.__mobyTarget !== $virtualPageIndex) {
                                 __mobyTarget = $virtualPageIndex;

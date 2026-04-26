@@ -257,37 +257,75 @@ fun ReaderScreen(
                 color = MaterialTheme.colorScheme.surface,
                 shadowElevation = 16.dp
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Text(
-                        text = if (pub.format == PublicationFormat.EPUB) "Capítulos" else "Páginas", 
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(16.dp).statusBarsPadding()
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
-                    androidx.compose.foundation.lazy.LazyColumn(
-                        modifier = Modifier.fillMaxSize().navigationBarsPadding()
+                var selectedTab by remember { mutableIntStateOf(0) }
+                val tabs = listOf("Índice", "Marcadores", "Notas")
+
+                Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+                    TabRow(
+                        selectedTabIndex = selectedTab,
+                        containerColor = Color.Transparent,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        divider = { HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)) }
                     ) {
-                        items(totalPages) { index ->
-                            val isSelected = index == currentPage
-                            androidx.compose.material3.TextButton(
-                                onClick = { 
-                                    progressUpdateHandler(index)
-                                    showChapterList = false 
-                                    showControls = false
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent),
-                                shape = androidx.compose.ui.graphics.RectangleShape
+                        tabs.forEachIndexed { index, title ->
+                            Tab(
+                                selected = selectedTab == index,
+                                onClick = { selectedTab = index },
+                                text = { 
+                                    Text(
+                                        text = title, 
+                                        fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
+                                        style = MaterialTheme.typography.labelMedium
+                                    ) 
+                                }
+                            )
+                        }
+                    }
+                    
+                    when (selectedTab) {
+                        0 -> {
+                            androidx.compose.foundation.lazy.LazyColumn(
+                                modifier = Modifier.fillMaxSize().navigationBarsPadding()
                             ) {
-                                Text(
-                                    text = if (pub.format == PublicationFormat.EPUB) "Capítulo ${index + 1}" else "Página ${index + 1}",
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                )
+                                items(totalPages) { index ->
+                                    val isSelected = index == currentPage
+                                    androidx.compose.material3.TextButton(
+                                        onClick = { 
+                                            progressUpdateHandler(index)
+                                            showChapterList = false 
+                                            showControls = false
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent),
+                                        shape = androidx.compose.ui.graphics.RectangleShape
+                                    ) {
+                                        Text(
+                                            text = if (pub.format == PublicationFormat.EPUB) "Capítulo ${index + 1}" else "Página ${index + 1}",
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        1 -> {
+                            Box(modifier = Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.Bookmark, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.Gray)
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Aún no tienes marcadores", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                        2 -> {
+                            Box(modifier = Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.Gray)
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Aún no tienes notas", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                                }
                             }
                         }
                     }

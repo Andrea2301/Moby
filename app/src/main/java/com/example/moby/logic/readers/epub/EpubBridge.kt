@@ -15,12 +15,14 @@ class EpubJavascriptBridge(
     private val onCenterTap: () -> Unit
 ) {
     @JavascriptInterface
-    fun onPageCountReady(count: Int) {
+    fun onPageCountReady(countStr: String) {
+        val count = countStr.toIntOrNull() ?: return
         scope.launch(Dispatchers.Main) { onVirtualPageCountReady(count) }
     }
 
     @JavascriptInterface
-    fun onVirtualPageIndexChanged(idx: Int) {
+    fun onVirtualPageIndexChanged(idxStr: String) {
+        val idx = idxStr.toIntOrNull() ?: return
         scope.launch(Dispatchers.Main) { onVirtualPageIndexChanged(idx) }
     }
 
