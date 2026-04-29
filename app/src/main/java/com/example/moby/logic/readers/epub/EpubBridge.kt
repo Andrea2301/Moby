@@ -6,14 +6,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class EpubJavascriptBridge(
+    private val context: android.content.Context,
     private val scope: CoroutineScope,
     private val onVirtualPageCountReady: (Int) -> Unit,
     private val onVirtualPageIndexChanged: (Int) -> Unit,
     private val onChapterBoundary: (Boolean) -> Unit,
     private val onTextSelectedRaw: (String, String, Float, Float, Float, Float) -> Unit,
     private val onSelectionClearedRaw: () -> Unit,
-    private val onCenterTap: () -> Unit
+    private val onCenterTap: () -> Unit,
+    private val onBookmarkToggled: (String) -> Unit
 ) {
+    @JavascriptInterface
+    fun onDebugLog(msg: String) {
+        android.util.Log.d("MobyJS", msg)
+    }
+
+    @JavascriptInterface
+    fun onBookmarkToggled(cfi: String) {
+        scope.launch(Dispatchers.Main) { onBookmarkToggled(cfi) }
+    }
+
     @JavascriptInterface
     fun onPageCountReady(countStr: String) {
         val count = countStr.toIntOrNull() ?: return

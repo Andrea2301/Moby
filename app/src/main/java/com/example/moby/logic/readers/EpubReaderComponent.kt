@@ -6,8 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -19,6 +18,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import com.example.moby.models.BookAnnotation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -40,12 +42,14 @@ fun EpubReaderComponent(
     onChapterChanged: (Int) -> Unit,
     onVirtualPageChanged: (Int, Int) -> Unit = { _, _ -> },
     onTotalChaptersReady: (Int) -> Unit,
+    onChaptersLoaded: (List<String>) -> Unit = {},
     fontSize: Float = 100f,
     fontFamily: String = "Serif",
     lineSpacing: Float = 1.65f,
     isVerticalMode: Boolean,
     theme: ReaderTheme,
-    onCenterTap: () -> Unit
+    onCenterTap: () -> Unit,
+    onToggleBookmarkRequested: ((() -> Unit) -> Unit)? = null
 ) {
     var chapters by remember { mutableStateOf<List<String>>(emptyList()) }
     var opfDir by remember { mutableStateOf("") }
@@ -71,7 +75,11 @@ fun EpubReaderComponent(
                 val chapterHs = """<itemref[^>]+idref="([^"]+)"""".toRegex()
                     .findAll(spineX).mapNotNull { manifestMap[it.groupValues[1]] }.toList()
                 zip.close()
-                withContext(Dispatchers.Main) { chapters = chapterHs; onTotalChaptersReady(chapterHs.size) }
+                withContext(Dispatchers.Main) { 
+                    chapters = chapterHs
+                    onTotalChaptersReady(chapterHs.size)
+                    onChaptersLoaded(chapterHs)
+                }
             } catch (e: Exception) { withContext(Dispatchers.Main) { fileLoadError = true } }
         }
     }
@@ -157,15 +165,15 @@ fun EpubReaderComponent(
                 } else {
                     0
                 },
-                onVirtualPageCountReady = { count ->
+                onVirtualPageCountReady = { count: Int ->
                     chapterPageCounts[page] = count
                 },
-                onVirtualPageIndexChanged = { idx ->
+                onVirtualPageIndexChanged = { idx: Int ->
                     if (page == pagerState.currentPage) {
                         virtualPageIndex = idx
                     }
                 },
-                onChapterBoundary = { reachedEnd ->
+                onChapterBoundary = { reachedEnd: Boolean ->
                     if (!isNavigating) {
                         if (reachedEnd && pagerState.currentPage < chapters.size - 1) {
                             scope.launch {
@@ -193,7 +201,8 @@ fun EpubReaderComponent(
                     }
                 },
                 onCenterTap = onCenterTap,
-                chapterTotalPages = chapterPageCounts[page] ?: 1
+                chapterTotalPages = chapterPageCounts[page] ?: 1,
+                onToggleBookmarkRequested = if (page == pagerState.currentPage) onToggleBookmarkRequested else null
             )
         }
     }
@@ -215,7 +224,8 @@ fun EpubChapterRender(
     onVirtualPageIndexChanged: (Int) -> Unit,
     onCenterTap: () -> Unit,
     onVirtualPageCountReady: (Int) -> Unit,
-    chapterTotalPages: Int
+    chapterTotalPages: Int,
+    onToggleBookmarkRequested: ((() -> Unit) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -228,6 +238,8 @@ fun EpubChapterRender(
 
     // SELECTION STATE
     var showSelectionPopup by remember { mutableStateOf(false) }
+    var showNoteDialog by remember { mutableStateOf(false) }
+    var noteText by remember { mutableStateOf("") }
     var selectionText by remember { mutableStateOf("") }
     var selectionCfi by remember { mutableStateOf("") }
     var selectionX by remember { mutableFloatStateOf(0f) }
@@ -261,29 +273,44 @@ fun EpubChapterRender(
         }
     }
 
-    LaunchedEffect(theme, fontSize, fontFamily, lineSpacing, isVerticalMode) {
-        val view = webViewRef.value ?: return@LaunchedEffect
-        if (!isPageReady) return@LaunchedEffect
-        val bgHex = theme.toBgHex(); val textHex = theme.toTextHex(); val fontStack = if (fontFamily == "Sans") "sans-serif" else "Georgia, serif"
-        view.evaluateJavascript("""
-            (function() {
-                var r = document.documentElement;
-                r.style.setProperty('--moby-bg', '$bgHex');
-                r.style.setProperty('--moby-text', '$textHex');
-                r.style.setProperty('--moby-font', '$fontStack');
-                r.style.setProperty('--moby-size', '${fontSize.toInt()}%');
-                r.style.setProperty('--moby-spacing', '$lineSpacing');
-                setTimeout(function() { mobyMeasure(); mobySync(); }, 80);
-            })();
-        """.trimIndent(), null)
+    val htmlContent = remember(rawBody, theme, fontSize, fontFamily, lineSpacing, isVerticalMode) {
+        val body = rawBody ?: ""
+        EpubHtmlContent.build(body, theme, fontSize, fontFamily, lineSpacing, isVerticalMode, virtualPageIndex)
     }
 
-    // Apply saved highlights when page is ready
+    val chapterDir = internalPath.substringBeforeLast("/", "")
+    val baseUrl = if (chapterDir.isNotEmpty()) "moby-epub://book/$chapterDir/" else "moby-epub://book/"
+
+    LaunchedEffect(htmlContent) {
+        val view = webViewRef.value ?: return@LaunchedEffect
+        isPageReady = false
+        view.loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
+    }
+
+    // Register the toggle action ONLY when this chapter is active
+    LaunchedEffect(onToggleBookmarkRequested) {
+        if (onToggleBookmarkRequested != null) {
+            onToggleBookmarkRequested.invoke {
+                // Toast de depuración para saber que la orden llegó a Kotlin
+                android.widget.Toast.makeText(context, "Motor: Procesando marcador...", android.widget.Toast.LENGTH_SHORT).show()
+                webViewRef.value?.evaluateJavascript("if(window.mobyRequestToggleBookmark) window.mobyRequestToggleBookmark();", null)
+            }
+        }
+    }
+
+    // Apply saved highlights and bookmarks when page is ready
     LaunchedEffect(isPageReady, annotations.size) {
         if (isPageReady) {
             val view = webViewRef.value ?: return@LaunchedEffect
-            annotations.forEach { ann ->
-                view.evaluateJavascript("mobyApplyHighlight(`${ann.cfiInfo}`, '');", null)
+            
+            // 1. Send Bookmarks
+            val bookmarksCfis = annotations.filter { it.selectedText.isEmpty() }.map { it.cfiInfo }
+            val bookmarksJson = "[" + bookmarksCfis.joinToString(",") { "'$it'" } + "]"
+            view.evaluateJavascript("mobyUpdateBookmarks(\"$bookmarksJson\");", null)
+
+            // 2. Apply Highlights
+            annotations.filter { it.selectedText.isNotEmpty() }.forEach { ann ->
+                view.evaluateJavascript("mobyApplyHighlight(`${ann.cfiInfo}`, '${ann.colorHex}');", null)
             }
         }
     }
@@ -310,6 +337,7 @@ fun EpubChapterRender(
                         isHapticFeedbackEnabled = false
                         
                         val bridge = EpubJavascriptBridge(
+                            context = context,
                             scope = scope,
                             onVirtualPageCountReady = onVirtualPageCountReady,
                             onVirtualPageIndexChanged = onVirtualPageIndexChanged,
@@ -324,7 +352,30 @@ fun EpubChapterRender(
                             onSelectionClearedRaw = {
                                 showSelectionPopup = false
                             },
-                            onCenterTap = onCenterTap
+                            onCenterTap = onCenterTap,
+                            onBookmarkToggled = { cfi ->
+                                scope.launch(Dispatchers.IO) {
+                                    // Comprobar si ya existe un marcador cerca de este CFI
+                                    val existing = annotations.find { it.cfiInfo == cfi && it.selectedText.isEmpty() }
+                                    if (existing != null) {
+                                        dao.deleteAnnotationById(existing.id)
+                                        withContext(Dispatchers.Main) { annotations.remove(existing) }
+                                    } else {
+                                        val newBookmark = BookAnnotation(
+                                            publicationId = publicationId,
+                                            chapterPath = internalPath,
+                                            cfiInfo = cfi,
+                                            selectedText = "",
+                                            colorHex = "#FF5252"
+                                        )
+                                        dao.insertAnnotation(newBookmark)
+                                        withContext(Dispatchers.Main) { 
+                                            annotations.add(newBookmark)
+                                            android.widget.Toast.makeText(context, "Marcador guardado", android.widget.Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                }
+                            }
                         )
                         addJavascriptInterface(bridge, "mobyBridge")
 
@@ -394,11 +445,16 @@ fun EpubChapterRender(
                         dao.insertAnnotation(annotation)
                         withContext(Dispatchers.Main) {
                             annotations.add(annotation)
-                            webViewRef.value?.evaluateJavascript("mobyApplyHighlight(`${selectionCfi}`, '');", null)
+                            webViewRef.value?.evaluateJavascript("mobyApplyHighlight(`${selectionCfi}`, '$color');", null)
                             webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
                             showSelectionPopup = false
                         }
                     }
+                },
+                onAddNote = {
+                    showNoteDialog = true
+                    showSelectionPopup = false
+                    noteText = ""
                 },
                 onCopy = {
                     clipboardManager.setText(AnnotatedString(selectionText))
@@ -410,6 +466,60 @@ fun EpubChapterRender(
                     showSelectionPopup = false
                 }
             )
+        }
+
+        if (showNoteDialog) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { showNoteDialog = false }) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 6.dp
+                ) {
+                    Column(modifier = Modifier.padding(24.dp)) {
+                        Text("Nueva Nota", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Surface(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                            Text(text = "“$selectionText”", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp), color = Color.Gray, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = noteText,
+                            onValueChange = { noteText = it },
+                            placeholder = { Text("Escribe tus pensamientos aquí...") },
+                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            TextButton(onClick = { showNoteDialog = false }) { Text("Cancelar") }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    val annotation = BookAnnotation(
+                                        publicationId = publicationId,
+                                        chapterPath = internalPath,
+                                        cfiInfo = selectionCfi,
+                                        selectedText = selectionText,
+                                        colorHex = "#FFD600",
+                                        note = noteText
+                                    )
+                                    scope.launch(Dispatchers.IO) {
+                                        dao.insertAnnotation(annotation)
+                                        withContext(Dispatchers.Main) {
+                                            annotations.add(annotation)
+                                            webViewRef.value?.evaluateJavascript("mobyApplyHighlight(`${selectionCfi}`, '#FFD600');", null)
+                                            webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
+                                            showNoteDialog = false
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp)
+                            ) { Text("Guardar Nota") }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -63,6 +63,7 @@ fun ReaderScreen(
     var showChapterList by remember { mutableStateOf(false) }
     var totalPages by remember { mutableIntStateOf(0) }
     var currentPage by remember { mutableIntStateOf(0) }
+    var chapterPaths by remember { mutableStateOf<List<String>>(emptyList()) }
     
     var virtualPageIndex by remember { mutableIntStateOf(0) }
     var virtualPageCount by remember { mutableIntStateOf(1) }
@@ -85,6 +86,8 @@ fun ReaderScreen(
     var isVerticalMode: Boolean by remember { mutableStateOf(false) }
     var isRtlEnabled: Boolean by remember { mutableStateOf(false) }
     var isWebtoonMode: Boolean by remember { mutableStateOf(false) }
+    
+    var bookmarkAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // Sync local state when DataStore loads (first time or from other places)
     LaunchedEffect(savedTheme) { readerTheme = ReaderTheme.valueOf(savedTheme) }
@@ -101,13 +104,16 @@ fun ReaderScreen(
                 isLoading = false
                 currentPage = pub?.currentPosition ?: 0
                 isTextReflowEnabled = pub?.isTextReflowEnabled ?: false
-                isVerticalMode = pub?.isVerticalMode ?: false
+                var isVerticalMode = pub?.isVerticalMode ?: false
                 isSmartFitEnabled = pub?.isSmartFitEnabled ?: false
                 isRtlEnabled = pub?.isRtlEnabled ?: false
                 isWebtoonMode = pub?.isWebtoonMode ?: false
             }
         }
     }
+
+    val bookmarks by dao.getAllAnnotationsForPublication(publicationId).collectAsState(initial = emptyList())
+    val pageBookmarks = remember(bookmarks) { bookmarks.filter { it.selectedText.isEmpty() } }
 
     val isDark = readerTheme == ReaderTheme.ABISAL || readerTheme == ReaderTheme.ONYX
     val backgroundColor = when (readerTheme) {
@@ -190,9 +196,10 @@ fun ReaderScreen(
                         filePath = pub.filePath,
                         initialChapter = epChapter,
                         initialVirtualPage = epVirtualPage,
-                        onChapterChanged = progressUpdateHandler,
+                         onChapterChanged = progressUpdateHandler,
                         onVirtualPageChanged = { index, count -> virtualPageIndex = index; virtualPageCount = count },
                         onTotalChaptersReady = { totalPages = it },
+                        onChaptersLoaded = { paths -> chapterPaths = paths },
                         fontSize = fontSize,
                         fontFamily = fontFamily,
                         lineSpacing = lineSpacing,
@@ -204,7 +211,8 @@ fun ReaderScreen(
                                 showSettings = false
                                 showChapterList = false
                             }
-                        }
+                        },
+                        onToggleBookmarkRequested = { action -> bookmarkAction = action }
                     )
                 }
                 PublicationFormat.CBZ -> {
@@ -310,21 +318,134 @@ fun ReaderScreen(
                                 }
                             }
                         }
-                        1 -> {
-                            Box(modifier = Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.Bookmark, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.Gray)
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text("Aún no tienes marcadores", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                         1 -> {
+                            // Filtramos para mostrar TODO lo que tenga texto (resaltados)
+                            val insights = bookmarks.filter { it.selectedText.isNotEmpty() }
+                            
+                            if (insights.isEmpty()) {
+                                Box(modifier = Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text("Reading Insights", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text("Resalta frases que te emocionen para verlas aquí.", color = Color.Gray, style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
+                                }
+                            } else {
+                                androidx.compose.foundation.lazy.LazyColumn(
+                                    modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+                                    contentPadding = PaddingValues(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    items(insights.size) { index ->
+                                        val insight = insights[index]
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                                            shape = RoundedCornerShape(16.dp),
+                                            modifier = Modifier.fillMaxWidth().clickable { 
+                                                val chapterIdx = chapterPaths.indexOfFirst { it.contains(insight.chapterPath.substringAfterLast("/")) }
+                                                if (chapterIdx != -1) {
+                                                    // Navegamos al capítulo
+                                                    progressUpdateHandler(chapterIdx)
+                                                }
+                                                showChapterList = false 
+                                                showControls = false
+                                            }
+                                        ) {
+                                            Column(modifier = Modifier.padding(16.dp)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Box(modifier = Modifier.size(12.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color(android.graphics.Color.parseColor(insight.colorHex))))
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        insight.chapterPath.substringAfterLast("/").substringBeforeLast("."),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text(
+                                                    text = "“${insight.selectedText}”",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text(
+                                                    java.text.SimpleDateFormat("dd MMM, yyyy", java.util.Locale.getDefault()).format(java.util.Date(insight.createdAt)),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.Gray
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                         2 -> {
-                            Box(modifier = Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(48.dp), tint = Color.Gray)
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text("Aún no tienes notas", color = Color.Gray, style = MaterialTheme.typography.bodyMedium)
+                            // Filtramos las que tienen NOTA
+                            val userNotes = bookmarks.filter { !it.note.isNullOrEmpty() }
+                            
+                            if (userNotes.isEmpty()) {
+                                Box(modifier = Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                                        Icon(Icons.Default.EditNote, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text("Tus Reflexiones", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text("Aquí aparecerán tus pensamientos sobre el libro.", color = Color.Gray, style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
+                                }
+                            } else {
+                                androidx.compose.foundation.lazy.LazyColumn(
+                                    modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+                                    contentPadding = PaddingValues(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    items(userNotes.size) { index ->
+                                        val note = userNotes[index]
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
+                                            shape = RoundedCornerShape(20.dp),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                                            modifier = Modifier.fillMaxWidth().clickable {
+                                                val chapterIdx = chapterPaths.indexOfFirst { it.contains(note.chapterPath.substringAfterLast("/")) }
+                                                if (chapterIdx != -1) progressUpdateHandler(chapterIdx)
+                                                showChapterList = false 
+                                                showControls = false
+                                            }
+                                        ) {
+                                            Column(modifier = Modifier.padding(16.dp)) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(Icons.Default.StickyNote2, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(note.chapterPath.substringAfterLast("/").substringBeforeLast("."), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                                }
+                                                Spacer(modifier = Modifier.height(12.dp))
+                                                // El comentario del usuario (Lo más importante)
+                                                Text(
+                                                    text = note.note ?: "",
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Spacer(modifier = Modifier.height(12.dp))
+                                                // El texto original del libro (Previsualización)
+                                                Surface(
+                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text(
+                                                        text = "“${note.selectedText}”",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        modifier = Modifier.padding(8.dp),
+                                                        color = Color.Gray,
+                                                        maxLines = 2,
+                                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

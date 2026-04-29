@@ -55,4 +55,7 @@ interface PublicationDao {
 
     @Query("DELETE FROM annotations WHERE id = :id")
     suspend fun deleteAnnotationById(id: String)
+
+    @Query("SELECT * FROM annotations WHERE publicationId = :pubId ORDER BY createdAt DESC")
+    fun getAllAnnotationsForPublication(pubId: String): Flow<List<BookAnnotation>>
 }
