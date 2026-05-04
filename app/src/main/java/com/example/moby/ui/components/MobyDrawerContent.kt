@@ -35,9 +35,8 @@ fun MobyDrawerContent(
 ) {
     val items = remember {
         listOf(
-            DrawerItem("Recent", Icons.Default.History, MobyScreen.Recent),
             DrawerItem("Library", Icons.Default.LocalLibrary, MobyScreen.Library),
-            DrawerItem("Bookmarks", Icons.Default.Bookmarks, MobyScreen.Bookmarks),
+            DrawerItem("Favoritos", Icons.Default.Bookmarks, MobyScreen.Bookmarks),
             DrawerItem("Journal", Icons.Default.MenuBook, MobyScreen.Journal)
         )
     }

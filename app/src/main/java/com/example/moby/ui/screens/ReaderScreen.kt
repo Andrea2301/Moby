@@ -266,7 +266,7 @@ fun ReaderScreen(
                 shadowElevation = 16.dp
             ) {
                 var selectedTab by remember { mutableIntStateOf(0) }
-                val tabs = listOf("Índice", "Marcadores", "Notas")
+                val tabs = listOf("Índice", "Favoritos", "Notas")
 
                 Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
                     TabRow(

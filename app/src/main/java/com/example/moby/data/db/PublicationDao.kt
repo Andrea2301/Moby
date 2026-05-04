@@ -58,4 +58,7 @@ interface PublicationDao {
 
     @Query("SELECT * FROM annotations WHERE publicationId = :pubId ORDER BY createdAt DESC")
     fun getAllAnnotationsForPublication(pubId: String): Flow<List<BookAnnotation>>
+
+    @Query("SELECT * FROM annotations WHERE selectedText != '' ORDER BY RANDOM() LIMIT 1")
+    fun getRandomAnnotation(): Flow<BookAnnotation?>
 }

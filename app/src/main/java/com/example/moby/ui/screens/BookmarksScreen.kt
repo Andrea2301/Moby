@@ -4,5 +4,5 @@ import androidx.compose.runtime.Composable
 
 @Composable
 fun BookmarksScreen() {
-    PlaceholderScreen("Marcadores", "Tus citas y momentos favoritos guardados.")
+    PlaceholderScreen("Favoritos", "Tus citas y momentos favoritos guardados.")
 }

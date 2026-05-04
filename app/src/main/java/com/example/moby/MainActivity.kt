@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     ) { innerPadding ->
-                        // 🚀 IMMERSIVE FIX: Do NOT apply innerPadding if we are in the Reader
+                        //  IMMERSIVE FIX: Do NOT apply innerPadding if we are in the Reader
                         val modifier = if (currentScreen is MobyScreen.Reader) {
                             Modifier.fillMaxSize() 
                         } else {
@@ -113,10 +113,6 @@ class MainActivity : ComponentActivity() {
                             when (currentScreen) {
                                 MobyScreen.Home -> HomeScreen(
                                     isAbisal = isAbisal,
-                                    publicationDao = database.publicationDao(),
-                                    onNavigate = { screen -> currentScreen = screen }
-                                )
-                                MobyScreen.Recent -> RecentScreen(
                                     publicationDao = database.publicationDao(),
                                     onNavigate = { screen -> currentScreen = screen }
                                 )
