@@ -35,6 +35,8 @@ local.properties
 .bundle/
 vendor/bundle/
 *.log
+hs_err_pid*
+replay_pid*
 
 # External Native Build
 .externalNativeBuild/

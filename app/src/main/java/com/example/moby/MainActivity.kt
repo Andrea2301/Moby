@@ -55,6 +55,9 @@ class MainActivity : ComponentActivity() {
             val scope = rememberCoroutineScope()
             var currentScreen: MobyScreen by remember { mutableStateOf(MobyScreen.Home) }
             var showLanding by remember { mutableStateOf(true) }
+            
+            var searchQuery by remember { mutableStateOf("") }
+            var isSearchActive by remember { mutableStateOf(false) }
 
             if (showLanding) {
                 MobyLandingScreen(onFinished = { showLanding = false })
@@ -89,6 +92,10 @@ class MainActivity : ComponentActivity() {
                                 MobyTopBar(
                                     isAbisal = isAbisal,
                                     currentScreen = currentScreen,
+                                    searchQuery = searchQuery,
+                                    onSearchQueryChange = { searchQuery = it },
+                                    isSearchActive = isSearchActive,
+                                    onSearchActiveChange = { isSearchActive = it },
                                     onThemeToggle = { 
                                         scope.launch { 
                                             preferencesManager.setAbisal(!isAbisal) 
@@ -114,12 +121,14 @@ class MainActivity : ComponentActivity() {
                                 MobyScreen.Home -> HomeScreen(
                                     isAbisal = isAbisal,
                                     publicationDao = database.publicationDao(),
+                                    searchQuery = searchQuery,
                                     onNavigate = { screen -> currentScreen = screen }
                                 )
                                 MobyScreen.Library -> LibraryScreen(
                                     publicationDao = database.publicationDao(),
                                     metadataExtractor = metadataExtractor,
                                     preferencesManager = preferencesManager,
+                                    searchQuery = searchQuery,
                                     onNavigate = { screen -> currentScreen = screen }
                                 )
                                 MobyScreen.Bookmarks -> BookmarksScreen ()

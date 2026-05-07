@@ -51,6 +51,7 @@ class BookMetadataExtractor(private val context: Context) {
             }
 
             Publication(
+                id = fileName,
                 title = title,
                 author = author,
                 format = format,

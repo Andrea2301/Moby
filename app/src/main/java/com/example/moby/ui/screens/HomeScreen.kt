@@ -10,10 +10,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -67,22 +70,29 @@ fun HomeScreen(
     modifier: Modifier = Modifier, 
     isAbisal: Boolean,
     publicationDao: PublicationDao,
+    searchQuery: String,
     onNavigate: (MobyScreen) -> Unit
 ) {
     val publications by publicationDao.getAllPublications().collectAsState(initial = emptyList())
     
     
-    // Libros para el carrusel (los 5 más recientes en lectura)
-    val followReading = remember(publications) {
-        publications.filter { it.lastRead > 0 }
+    // Libros para el carrusel (los 5 más recientes en lectura) que coincidan con la búsqueda
+    val followReading = remember(publications, searchQuery) {
+        publications.filter { 
+            it.lastRead > 0 && 
+            (it.title.contains(searchQuery, ignoreCase = true) || it.author.contains(searchQuery, ignoreCase = true))
+        }
             .sortedByDescending { it.lastRead }
             .take(5)
     }
 
-    // Libros para la lista de abajo (el resto)
-    val historyBooks = remember(publications, followReading) {
+    // Libros para la lista de abajo (el resto) que coincidan con la búsqueda
+    val historyBooks = remember(publications, followReading, searchQuery) {
         val followIds = followReading.map { it.id }.toSet()
-        publications.filter { it.id !in followIds }
+        publications.filter { 
+            it.id !in followIds && 
+            (it.title.contains(searchQuery, ignoreCase = true) || it.author.contains(searchQuery, ignoreCase = true))
+        }
             .sortedByDescending { it.dateAdded }
             .take(10)
     }
@@ -149,8 +159,7 @@ fun HomeScreen(
                     )
                 }
             }
-
-
+            
             // CARRUSEL ANIMADO (Seguir Leyendo)
             if (followReading.isNotEmpty()) {
                 item {
@@ -230,7 +239,7 @@ fun HomeScreen(
             if (historyBooks.isNotEmpty()) {
                 item {
                     Text(
-                        text = "Recientemente añadidos",
+                        text = if (searchQuery.isEmpty()) "Recientemente añadidos" else "Resultados encontrados",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onBackground,
@@ -246,6 +255,21 @@ fun HomeScreen(
                         onClick = { onNavigate(MobyScreen.Reader(book.id)) },
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
                     )
+                }
+            } else if (searchQuery.isNotEmpty() && followReading.isEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 64.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            "No encontramos nada para \"$searchQuery\"",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+                        )
+                    }
                 }
             }
         }
