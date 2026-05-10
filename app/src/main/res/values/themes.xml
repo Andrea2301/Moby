@@ -2,7 +2,7 @@
 <resources>
 
     <!-- Main application theme -->
-    <style name="Theme.Moby" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Theme.Moby" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="android:windowBackground">@color/moby_abisal</item>
         <item name="android:statusBarColor">@color/moby_abisal</item>
     </style>

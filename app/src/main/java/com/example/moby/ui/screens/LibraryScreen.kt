@@ -444,17 +444,16 @@ fun LibraryScreen(
     }
 
     if (showWebCoverSearch && publicationToEdit != null) {
-        WebCoverSearchDialog(
-            publication = publicationToEdit!!,
-            searchService = coverSearchService,
+        com.example.moby.ui.components.WebCoverBrowserDialog(
+            initialQuery = "${publicationToEdit!!.title} ${publicationToEdit!!.author}",
             onDismiss = { showWebCoverSearch = false },
-            onCoverSelected = { coverUrl ->
+            onImageSelected = { coverUrl ->
                 scope.launch {
                     val localPath = coverSearchService.downloadCover(coverUrl, publicationToEdit!!.id)
                     if (localPath != null) {
                         val updatedPub = publicationToEdit!!.copy(coverUrl = localPath)
                         publicationDao.updatePublication(updatedPub)
-                        snackbarHostState.showSnackbar("Portada actualizada desde la web")
+                        snackbarHostState.showSnackbar("Portada actualizada")
                     } else {
                         snackbarHostState.showSnackbar("Error al descargar la portada")
                     }
@@ -644,88 +643,4 @@ private fun FormatChip(label: String, selected: Boolean, onClick: () -> Unit) {
     )
 }
 
-@Composable
-fun WebCoverSearchDialog(
-    publication: com.example.moby.models.Publication,
-    searchService: com.example.moby.logic.CoverSearchService,
-    onDismiss: () -> Unit,
-    onCoverSelected: (String) -> Unit
-) {
-    var searchQuery by remember { mutableStateOf("${publication.title} ${publication.author}") }
-    var covers by remember { mutableStateOf<List<com.example.moby.logic.WebCover>>(emptyList()) }
-    var isSearching by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        isSearching = true
-        covers = searchService.searchCovers(searchQuery)
-        isSearching = false
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Buscar Portada Online") },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    label = { Text("Términos de búsqueda") },
-                    modifier = Modifier.fillMaxWidth(),
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            scope.launch {
-                                isSearching = true
-                                covers = searchService.searchCovers(searchQuery)
-                                isSearching = false
-                            }
-                        }) {
-                            Icon(Icons.Filled.Search, contentDescription = "Buscar")
-                        }
-                    }
-                )
-                
-                Spacer(Modifier.height(16.dp))
-
-                if (isSearching) {
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                } else if (covers.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                        Text("No se encontraron portadas", style = MaterialTheme.typography.bodyMedium)
-                    }
-                } else {
-                    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
-                        modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(covers.size) { index ->
-                            val cover = covers[index]
-                            Card(
-                                onClick = { onCoverSelected(cover.largeUrl) },
-                                modifier = Modifier.aspectRatio(0.7f),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                coil.compose.AsyncImage(
-                                    model = cover.thumbnailUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancelar")
-            }
-        }
-    )
-}
 

@@ -55,12 +55,15 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coil.compose)
+    implementation(libs.googleMaterial)
     
     // Room
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.core.ktx)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation(libs.androidx.compose.ui.text)
+    implementation(libs.androidx.ui.graphics)
     ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

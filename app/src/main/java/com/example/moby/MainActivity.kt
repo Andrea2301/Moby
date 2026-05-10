@@ -26,6 +26,7 @@ import com.example.moby.ui.components.MobyTopBar
 import com.example.moby.ui.screens.*
 import com.example.moby.ui.theme.MobyTheme
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -34,13 +35,17 @@ class MainActivity : ComponentActivity() {
     private lateinit var metadataExtractor: BookMetadataExtractor
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val splashScreen = installSplashScreen()
-        // Animación de salida instantánea para pasar de inmediato a tu transición
-        splashScreen.setOnExitAnimationListener { splashProvider ->
-            splashProvider.remove()
-        }
+        installSplashScreen()
         super.onCreate(savedInstanceState)
-        PDFBoxResourceLoader.init(this)
+        
+        // Carga diferida para no bloquear el Splash
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                PDFBoxResourceLoader.init(applicationContext)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
         
         preferencesManager = PreferencesManager(this)
         database = MobyDatabase.getDatabase(this)
