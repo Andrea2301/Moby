@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
-enum class LibraryViewMode { GRID, LIST, SHELF }
+enum class LibraryViewMode { GRID, LIST, SHELF, GENRES }
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "moby_preferences")
 

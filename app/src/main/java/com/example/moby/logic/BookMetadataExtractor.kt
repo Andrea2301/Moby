@@ -33,6 +33,7 @@ class BookMetadataExtractor(private val context: Context) {
             var title = fileName.replaceAfterLast(".", "").removeSuffix(".")
             var author = "Unknown Author"
             var coverPath: String? = null
+            var genre = "General"
 
             when (format) {
                 PublicationFormat.EPUB -> {
@@ -40,6 +41,7 @@ class BookMetadataExtractor(private val context: Context) {
                     if (metadata.title != null) title = metadata.title
                     if (metadata.author != null) author = metadata.author
                     coverPath = metadata.coverPath
+                    if (metadata.genre != null) genre = metadata.genre
                 }
                 PublicationFormat.PDF -> {
                     coverPath = generatePdfThumbnail(internalFile)
@@ -56,7 +58,8 @@ class BookMetadataExtractor(private val context: Context) {
                 author = author,
                 format = format,
                 coverUrl = coverPath,
-                filePath = internalFile.absolutePath
+                filePath = internalFile.absolutePath,
+                genre = genre
             )
         } catch (e: Exception) {
             Log.e("MetadataExtractor", "Error extracting metadata", e)
@@ -137,22 +140,28 @@ class BookMetadataExtractor(private val context: Context) {
         return low.endsWith(".jpg") || low.endsWith(".jpeg") || low.endsWith(".png") || low.endsWith(".webp")
     }
 
-    private data class EpubMetadata(val title: String?, val author: String?, val coverPath: String?)
+    private data class EpubMetadata(
+        val title: String?, 
+        val author: String?, 
+        val coverPath: String?,
+        val genre: String?
+    )
 
     private fun extractEpubMetadata(file: File): EpubMetadata {
         var title: String? = null
         var author: String? = null
         var coverPath: String? = null
+        var genre: String? = null
 
         try {
             java.util.zip.ZipFile(file).use { zip ->
-                val containerEntry = zip.getEntry("META-INF/container.xml") ?: return EpubMetadata(null, null, null)
+                val containerEntry = zip.getEntry("META-INF/container.xml") ?: return EpubMetadata(null, null, null, null)
                 val containerXml = zip.getInputStream(containerEntry).bufferedReader().readText()
                 
                 val rootFileRegex = """<rootfile[^>]+full-path="([^"]+)"""".toRegex()
-                val opfPath = rootFileRegex.find(containerXml)?.groupValues?.get(1) ?: return EpubMetadata(null, null, null)
+                val opfPath = rootFileRegex.find(containerXml)?.groupValues?.get(1) ?: return EpubMetadata(null, null, null, null)
                 
-                val opfEntry = zip.getEntry(opfPath) ?: return EpubMetadata(null, null, null)
+                val opfEntry = zip.getEntry(opfPath) ?: return EpubMetadata(null, null, null, null)
                 val opfXml = zip.getInputStream(opfEntry).bufferedReader().readText()
                 
                 val titleRegex = """<dc:title[^>]*>(.*?)</dc:title>""".toRegex()
@@ -160,6 +169,9 @@ class BookMetadataExtractor(private val context: Context) {
                 
                 val creatorRegex = """<dc:creator[^>]*>(.*?)</dc:creator>""".toRegex()
                 author = creatorRegex.find(opfXml)?.groupValues?.get(1)
+
+                val subjectRegex = """<dc:subject[^>]*>(.*?)</dc:subject>""".toRegex()
+                genre = subjectRegex.find(opfXml)?.groupValues?.get(1)
                 
                 val coverMetaRegex = """<meta[^>]+name="cover"[^>]+content="([^"]+)"""".toRegex(RegexOption.IGNORE_CASE)
                 val coverIdMatch = coverMetaRegex.find(opfXml)
@@ -227,6 +239,6 @@ class BookMetadataExtractor(private val context: Context) {
             Log.e("MetadataExtractor", "Error extracting EPUB metadata", e)
         }
         
-        return EpubMetadata(title, author, coverPath)
+        return EpubMetadata(title, author, coverPath, genre)
     }
 }

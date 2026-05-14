@@ -25,7 +25,8 @@ data class Publication(
     val isTextReflowEnabled: Boolean = false,
     val isRtlEnabled: Boolean = false,
     val isWebtoonMode: Boolean = false,
-    val isSmartFitEnabled: Boolean = false
+    val isSmartFitEnabled: Boolean = false,
+    val genre: String = "General"
 ) {
     val progress: Float
         get() = if (totalPages > 0) currentPosition.toFloat() / totalPages else 0f

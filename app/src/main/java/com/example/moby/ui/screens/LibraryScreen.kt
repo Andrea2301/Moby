@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.filled.AllInclusive
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -38,6 +39,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.moby.data.db.PublicationDao
@@ -55,441 +57,8 @@ enum class ReadingStatus {
     UNREAD, READING, FINISHED
 }
 
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun LibraryScreen(
-    publicationDao: PublicationDao,
-    metadataExtractor: BookMetadataExtractor,
-    preferencesManager: com.example.moby.data.PreferencesManager,
-    searchQuery: String,
-    onNavigate: (com.example.moby.MobyScreen) -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val publications by publicationDao.getAllPublications().collectAsState(initial = emptyList())
-    val viewMode by preferencesManager.libraryViewModeFlow.collectAsState(initial = com.example.moby.data.LibraryViewMode.GRID)
-    val snackbarHostState = remember { SnackbarHostState() }
-    var selectedFormat by remember { mutableStateOf<com.example.moby.models.PublicationFormat?>(null) }
-    var showFilterSheet by remember { mutableStateOf(false) }
-    
-    var sortBy by remember { mutableStateOf(SortBy.DATE_ADDED) }
-    var readingFilters by remember { mutableStateOf(setOf(ReadingStatus.UNREAD, ReadingStatus.READING, ReadingStatus.FINISHED)) }
-    var groupByAuthor by remember { mutableStateOf(false) }
-
-    var publicationToEdit by remember { mutableStateOf<com.example.moby.models.Publication?>(null) }
-    var showContextMenu by remember { mutableStateOf(false) }
-    
-    val coverSearchService = remember { com.example.moby.logic.CoverSearchService(context) }
-    var showWebCoverSearch by remember { mutableStateOf(false) }
-
-    val coverPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { sourceUri ->
-            publicationToEdit?.let { pub ->
-                scope.launch {
-                    try {
-                        val coverDir = File(context.filesDir, "covers")
-                        if (!coverDir.exists()) coverDir.mkdirs()
-                        
-                        val coverFile = File(coverDir, "cover_${pub.id}.jpg")
-                        context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                            coverFile.outputStream().use { output ->
-                                input.copyTo(output)
-                            }
-                        }
-                        
-                        val updatedPub = pub.copy(coverUrl = coverFile.absolutePath)
-                        publicationDao.updatePublication(updatedPub)
-                        snackbarHostState.showSnackbar("Portada actualizada")
-                    } catch (e: Exception) {
-                        snackbarHostState.showSnackbar("Error al guardar la portada")
-                    } finally {
-                        publicationToEdit = null
-                    }
-                }
-            }
-        }
-    }
-
-    val filteredPublications = remember(publications, searchQuery, selectedFormat, sortBy, readingFilters) {
-        publications.filter { pub ->
-            // Búsqueda
-            val matchesSearch = searchQuery.isEmpty() || pub.title.contains(searchQuery, ignoreCase = true) || pub.author.contains(searchQuery, ignoreCase = true)
-            // Formato
-            val matchesFormat = selectedFormat == null || pub.format == selectedFormat
-            // Estado de lectura
-            val status = when {
-                pub.currentPosition == 0 -> ReadingStatus.UNREAD
-                pub.currentPosition >= pub.totalPages && pub.totalPages > 0 -> ReadingStatus.FINISHED
-                else -> ReadingStatus.READING
-            }
-            val matchesStatus = status in readingFilters
-
-            matchesSearch && matchesFormat && matchesStatus
-        }.let { list ->
-            // Ordenamiento
-            when (sortBy) {
-                SortBy.TITLE -> list.sortedBy { it.title }
-                SortBy.AUTHOR -> list.sortedBy { it.author }
-                SortBy.DATE_ADDED -> list.sortedByDescending { it.dateAdded }
-            }
-        }
-    }
-
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            scope.launch {
-                snackbarHostState.showSnackbar("Importando ${uris.size} libros...")
-                var importedCount = 0
-                
-                uris.forEach { uri ->
-                    val fileName = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        cursor.moveToFirst()
-                        cursor.getString(nameIndex)
-                    } ?: "libro_${System.currentTimeMillis()}"
-
-                    // DETECCIÓN DE DUPLICADOS (En importación masiva, saltamos los duplicados silenciosamente para no saturar)
-                    val existing = publicationDao.getPublicationById(fileName)
-                    if (existing == null) {
-                        val newPublication = metadataExtractor.extract(uri, fileName)
-                        if (newPublication != null) {
-                            publicationDao.insertPublication(newPublication)
-                            importedCount++
-                        }
-                    }
-                }
-                
-                snackbarHostState.showSnackbar("Importación finalizada: $importedCount nuevos libros añadidos")
-            }
-        }
-    }
-
-    Scaffold(
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        containerColor = androidx.compose.ui.graphics.Color.Transparent
-    ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (publications.isEmpty()) {
-                PlaceholderScreen(
-                    title = "Biblioteca Vacía",
-                    subtitle = "Usa el botón '+' para importar tus primeros libros (PDF, EPUB, CBZ)."
-                )
-            } else {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${publications.size} libros",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // BOTÓN DE FILTRO AVANZADO
-                            IconButton(onClick = { showFilterSheet = true }) {
-                                Icon(
-                                    imageVector = Icons.Filled.FilterList,
-                                    contentDescription = "Filtrar",
-                                    tint = if (selectedFormat != null || sortBy != SortBy.DATE_ADDED || readingFilters.size < 3) 
-                                        MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
-                                )
-                            }
-
-                            // BOTÓN DE VISTA (Solo icono rápido, el completo está en el panel)
-                            IconButton(onClick = {
-                                scope.launch {
-                                    val nextMode = when(viewMode) {
-                                        com.example.moby.data.LibraryViewMode.GRID -> com.example.moby.data.LibraryViewMode.SHELF
-                                        com.example.moby.data.LibraryViewMode.SHELF -> com.example.moby.data.LibraryViewMode.LIST
-                                        com.example.moby.data.LibraryViewMode.LIST -> com.example.moby.data.LibraryViewMode.GRID
-                                    }
-                                    preferencesManager.setLibraryViewMode(nextMode)
-                                }
-                            }) {
-                                Icon(
-                                    imageVector = when(viewMode) {
-                                        com.example.moby.data.LibraryViewMode.GRID -> Icons.Filled.GridView
-                                        com.example.moby.data.LibraryViewMode.SHELF -> Icons.Filled.TableRows
-                                        com.example.moby.data.LibraryViewMode.LIST -> Icons.Filled.ViewList
-                                    },
-                                    contentDescription = "Cambiar Vista Style"
-                                )
-                            }
-                        }
-                    }
-                    
-                    val groupedPublications = remember(filteredPublications, groupByAuthor) {
-                        if (groupByAuthor) {
-                            filteredPublications.groupBy { it.author }
-                        } else {
-                            mapOf("Todos los libros" to filteredPublications)
-                        }
-                    }
-
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 80.dp)
-                    ) {
-                        groupedPublications.forEach { (author, books) ->
-                            if (groupByAuthor) {
-                                stickyHeader {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-                                    ) {
-                                        Text(
-                                            text = author,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            when (viewMode) {
-                                com.example.moby.data.LibraryViewMode.LIST -> {
-                                    items(books) { publication ->
-                                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                                            com.example.moby.ui.components.PublicationListItem(
-                                                publication = publication,
-                                                onClick = { onNavigate(com.example.moby.MobyScreen.Reader(publication.id)) },
-                                                onLongClick = { 
-                                                    publicationToEdit = publication
-                                                    showContextMenu = true
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                                com.example.moby.data.LibraryViewMode.GRID -> {
-                                    val rows = books.chunked(3)
-                                    items(rows) { rowItems ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                                        ) {
-                                            rowItems.forEach { publication ->
-                                                Box(modifier = Modifier.weight(1f)) {
-                                                    PublicationCard(
-                                                        publication = publication,
-                                                        onClick = { onNavigate(com.example.moby.MobyScreen.Reader(publication.id)) },
-                                                        onLongClick = { 
-                                                            publicationToEdit = publication
-                                                            showContextMenu = true
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                            repeat(3 - rowItems.size) {
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                }
-                                com.example.moby.data.LibraryViewMode.SHELF -> {
-                                    val rows = books.chunked(3)
-                                    items(rows) { rowItems ->
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth().padding(top = 28.dp),
-                                            contentAlignment = Alignment.BottomCenter
-                                        ) {
-                                            // Estante
-                                            Column(modifier = Modifier.fillMaxWidth()) {
-                                                Box(
-                                                    modifier = Modifier.fillMaxWidth().height(24.dp)
-                                                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(
-                                                            colors = listOf(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.surfaceVariant)
-                                                        ))
-                                                )
-                                                Box(
-                                                    modifier = Modifier.fillMaxWidth().height(6.dp)
-                                                        .background(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp))
-                                                )
-                                            }
-                                            // Libros
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
-                                                horizontalArrangement = Arrangement.SpaceAround,
-                                                verticalAlignment = Alignment.Bottom
-                                            ) {
-                                                rowItems.forEach { publication ->
-                                                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                                        Card(
-                                                            modifier = Modifier.width(90.dp).height(130.dp)
-                                                                .combinedClickable(
-                                                                    onClick = { onNavigate(com.example.moby.MobyScreen.Reader(publication.id)) },
-                                                                    onLongClick = { 
-                                                                        publicationToEdit = publication
-                                                                        showContextMenu = true
-                                                                    }
-                                                                ),
-                                                            shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = 1.dp, bottomEnd = 1.dp),
-                                                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
-                                                        ) {
-                                                            coil.compose.AsyncImage(
-                                                                model = publication.coverUrl,
-                                                                contentDescription = null,
-                                                                modifier = Modifier.fillMaxSize(),
-                                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                                repeat(3 - rowItems.size) { Spacer(modifier = Modifier.weight(1f)) }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            var fabExpanded by remember { mutableStateOf(false) }
-
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.End
-            ) {
-                if (fabExpanded) {
-                    ExtendedFloatingActionButton(
-                        text = { Text("Limpiar Biblioteca") },
-                        icon = { Icon(Icons.Filled.Delete, contentDescription = "Clean") },
-                        onClick = { 
-                            scope.launch { publicationDao.deleteAllPublications() }
-                            fabExpanded = false 
-                        },
-                        modifier = Modifier.padding(bottom = 16.dp),
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                    
-                    ExtendedFloatingActionButton(
-                        text = { Text("Importar Libro") },
-                        icon = { Icon(Icons.Filled.Add, contentDescription = "Import") },
-                        onClick = { 
-                            launcher.launch(arrayOf(
-                                "application/pdf", 
-                                "application/epub+zip", 
-                                "application/x-cbz",
-                                "application/zip",
-                                "application/octet-stream"
-                            ))
-                            fabExpanded = false 
-                        },
-                        modifier = Modifier.padding(bottom = 16.dp),
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-
-                FloatingActionButton(
-                    onClick = { fabExpanded = !fabExpanded },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ) {
-                    Icon(
-                        if (fabExpanded) Icons.Filled.Close else Icons.Filled.Add, 
-                        contentDescription = "Opciones"
-                    )
-                }
-            }
-        }
-    }
-
-    if (showContextMenu && publicationToEdit != null) {
-        AlertDialog(
-            onDismissRequest = { 
-                showContextMenu = false
-                publicationToEdit = null
-            },
-            title = { Text(publicationToEdit?.title ?: "Opciones") },
-            text = { Text("¿Qué deseas hacer con este libro?") },
-            confirmButton = {
-                Column {
-                    TextButton(onClick = { 
-                        showContextMenu = false
-                        coverPickerLauncher.launch("image/*")
-                    }) {
-                        Text("Elegir de Galería")
-                    }
-                    TextButton(onClick = { 
-                        showContextMenu = false
-                        showWebCoverSearch = true
-                    }) {
-                        Text("Buscar en la Web")
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { 
-                    scope.launch {
-                        publicationToEdit?.let { publicationDao.deletePublication(it) }
-                        showContextMenu = false
-                        publicationToEdit = null
-                    }
-                }) {
-                    Text("Eliminar Libro", color = MaterialTheme.colorScheme.error)
-                }
-            }
-        )
-    }
-
-    if (showWebCoverSearch && publicationToEdit != null) {
-        com.example.moby.ui.components.WebCoverBrowserDialog(
-            initialQuery = "${publicationToEdit!!.title} ${publicationToEdit!!.author}",
-            onDismiss = { showWebCoverSearch = false },
-            onImageSelected = { coverUrl ->
-                scope.launch {
-                    val localPath = coverSearchService.downloadCover(coverUrl, publicationToEdit!!.id)
-                    if (localPath != null) {
-                        val updatedPub = publicationToEdit!!.copy(coverUrl = localPath)
-                        publicationDao.updatePublication(updatedPub)
-                        snackbarHostState.showSnackbar("Portada actualizada")
-                    } else {
-                        snackbarHostState.showSnackbar("Error al descargar la portada")
-                    }
-                    showWebCoverSearch = false
-                    publicationToEdit = null
-                }
-            }
-        )
-    }
-
-    if (showFilterSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showFilterSheet = false },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-        ) {
-            AdvancedFilterContent(
-                sortBy = sortBy,
-                onSortChange = { sortBy = it },
-                readingFilters = readingFilters,
-                onReadingFiltersChange = { readingFilters = it },
-                viewMode = viewMode,
-                onViewModeChange = { 
-                    scope.launch { preferencesManager.setLibraryViewMode(it) }
-                },
-                selectedFormat = selectedFormat,
-                onFormatChange = { selectedFormat = it },
-                groupByAuthor = groupByAuthor,
-                onGroupByAuthorChange = { groupByAuthor = it }
-            )
-        }
-    }
-}
-
-@Composable
-fun AdvancedFilterContent(
+fun LibraryAdvancedFilterPanel(
     sortBy: SortBy,
     onSortChange: (SortBy) -> Unit,
     readingFilters: Set<ReadingStatus>,
@@ -516,106 +85,560 @@ fun AdvancedFilterContent(
         Row(modifier = Modifier.fillMaxWidth()) {
             // ORDENADO POR
             Column(modifier = Modifier.weight(1f)) {
-                Text("Ordenado por", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                SortOption("Título", sortBy == SortBy.TITLE) { onSortChange(SortBy.TITLE) }
-                SortOption("Autor", sortBy == SortBy.AUTHOR) { onSortChange(SortBy.AUTHOR) }
-                SortOption("Fecha", sortBy == SortBy.DATE_ADDED) { onSortChange(SortBy.DATE_ADDED) }
+                Text(
+                    "Ordenado por",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                SortBy.entries.forEach { option ->
+                    FilterChip(
+                        selected = sortBy == option,
+                        onClick = { onSortChange(option) },
+                        label = { Text(option.name.replace("_", " ").lowercase().capitalize()) },
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
             }
 
-            // FILTRO DE LECTURA
+            // VISTA
             Column(modifier = Modifier.weight(1f)) {
-                Text("Filtro de lectura", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.height(8.dp))
-                FilterOption("Sin leer", ReadingStatus.UNREAD in readingFilters) {
-                    val next = if (ReadingStatus.UNREAD in readingFilters) readingFilters - ReadingStatus.UNREAD else readingFilters + ReadingStatus.UNREAD
-                    if (next.isNotEmpty()) onReadingFiltersChange(next)
-                }
-                FilterOption("Leyendo", ReadingStatus.READING in readingFilters) {
-                    val next = if (ReadingStatus.READING in readingFilters) readingFilters - ReadingStatus.READING else readingFilters + ReadingStatus.READING
-                    if (next.isNotEmpty()) onReadingFiltersChange(next)
-                }
-                FilterOption("Finalizado", ReadingStatus.FINISHED in readingFilters) {
-                    val next = if (ReadingStatus.FINISHED in readingFilters) readingFilters - ReadingStatus.FINISHED else readingFilters + ReadingStatus.FINISHED
-                    if (next.isNotEmpty()) onReadingFiltersChange(next)
+                Text(
+                    "Vista",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ViewModeIcon(
+                        icon = Icons.Default.GridView,
+                        selected = viewMode == com.example.moby.data.LibraryViewMode.GRID,
+                        onClick = { onViewModeChange(com.example.moby.data.LibraryViewMode.GRID) }
+                    )
+                    ViewModeIcon(
+                        icon = Icons.Default.ViewList,
+                        selected = viewMode == com.example.moby.data.LibraryViewMode.LIST,
+                        onClick = { onViewModeChange(com.example.moby.data.LibraryViewMode.LIST) }
+                    )
+                    ViewModeIcon(
+                        icon = Icons.Default.TableRows,
+                        selected = viewMode == com.example.moby.data.LibraryViewMode.SHELF,
+                        onClick = { onViewModeChange(com.example.moby.data.LibraryViewMode.SHELF) }
+                    )
+                    ViewModeIcon(
+                        icon = Icons.Default.AutoAwesome,
+                        selected = viewMode == com.example.moby.data.LibraryViewMode.GENRES,
+                        onClick = { onViewModeChange(com.example.moby.data.LibraryViewMode.GENRES) }
+                    )
                 }
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // DISPOSICIÓN
-        Text("Disposición", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(12.dp))
+        // ESTADO DE LECTURA
+        Text(
+            "Estado de lectura",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            ReadingStatus.entries.forEach { status ->
+                val isSelected = status in readingFilters
+                FilterChip(
+                    selected = isSelected,
+                    onClick = {
+                        val newFilters = if (isSelected) readingFilters - status else readingFilters + status
+                        if (newFilters.isNotEmpty()) onReadingFiltersChange(newFilters)
+                    },
+                    label = { Text(status.name.lowercase().capitalize()) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // FORMATO
+        Text(
+            "Formato",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FormatChip(label = "Todos", selected = selectedFormat == null, onClick = { onFormatChange(null) })
+            com.example.moby.models.PublicationFormat.entries.forEach { format ->
+                FormatChip(
+                    label = format.name,
+                    selected = selectedFormat == format,
+                    onClick = { onFormatChange(format) }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // AGRUPAR POR AUTOR
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(24.dp))
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            LayoutToggle(Icons.Filled.ViewList, viewMode == com.example.moby.data.LibraryViewMode.LIST, Modifier.weight(1f)) {
-                onViewModeChange(com.example.moby.data.LibraryViewMode.LIST)
-            }
-            LayoutToggle(Icons.Filled.GridView, viewMode == com.example.moby.data.LibraryViewMode.GRID, Modifier.weight(1f)) {
-                onViewModeChange(com.example.moby.data.LibraryViewMode.GRID)
-            }
-            LayoutToggle(Icons.Filled.TableRows, viewMode == com.example.moby.data.LibraryViewMode.SHELF, Modifier.weight(1f)) {
-                onViewModeChange(com.example.moby.data.LibraryViewMode.SHELF)
+            Text(
+                "Agrupar por autor",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Switch(
+                checked = groupByAuthor,
+                onCheckedChange = onGroupByAuthorChange
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun LibraryScreen(
+    publicationDao: PublicationDao,
+    metadataExtractor: BookMetadataExtractor,
+    preferencesManager: com.example.moby.data.PreferencesManager,
+    searchQuery: String,
+    onNavigate: (com.example.moby.MobyScreen) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val publications by publicationDao.getAllPublications().collectAsState(initial = emptyList())
+    val viewMode by preferencesManager.libraryViewModeFlow.collectAsState(initial = com.example.moby.data.LibraryViewMode.GRID)
+    val snackbarHostState = remember { SnackbarHostState() }
+    var selectedFormat by remember { mutableStateOf<com.example.moby.models.PublicationFormat?>(null) }
+    var showFilterSheet by remember { mutableStateOf(false) }
+
+    var sortBy by remember { mutableStateOf(SortBy.DATE_ADDED) }
+    var readingFilters by remember {
+        mutableStateOf(
+            setOf(
+                ReadingStatus.UNREAD,
+                ReadingStatus.READING,
+                ReadingStatus.FINISHED
+            )
+        )
+    }
+    var groupByAuthor by remember { mutableStateOf(false) }
+
+    var publicationToEdit by remember { mutableStateOf<com.example.moby.models.Publication?>(null) }
+    var showContextMenu by remember { mutableStateOf(false) }
+
+    val coverSearchService = remember { com.example.moby.logic.CoverSearchService(context) }
+    var showWebCoverSearch by remember { mutableStateOf(false) }
+
+    val coverPickerLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            uri?.let { sourceUri ->
+                publicationToEdit?.let { pub ->
+                    scope.launch {
+                        try {
+                            val coverDir = File(context.filesDir, "covers")
+                            if (!coverDir.exists()) coverDir.mkdirs()
+
+                            val coverFile = File(coverDir, "cover_${pub.id}.jpg")
+                            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                                coverFile.outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+
+                            val updatedPub = pub.copy(coverUrl = coverFile.absolutePath)
+                            publicationDao.updatePublication(updatedPub)
+                            snackbarHostState.showSnackbar("Portada actualizada")
+                        } catch (e: Exception) {
+                            snackbarHostState.showSnackbar("Error al guardar la portada")
+                        } finally {
+                            publicationToEdit = null
+                        }
+                    }
+                }
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+    val filteredPublications =
+        remember(publications, searchQuery, selectedFormat, sortBy, readingFilters) {
+            publications.filter { pub ->
+                // Búsqueda
+                val matchesSearch = searchQuery.isEmpty() || pub.title.contains(
+                    searchQuery,
+                    ignoreCase = true
+                ) || pub.author.contains(searchQuery, ignoreCase = true)
+                // Formato
+                val matchesFormat = selectedFormat == null || pub.format == selectedFormat
+                // Estado de lectura
+                val status = when {
+                    pub.currentPosition == 0 -> ReadingStatus.UNREAD
+                    pub.currentPosition >= pub.totalPages && pub.totalPages > 0 -> ReadingStatus.FINISHED
+                    else -> ReadingStatus.READING
+                }
+                val matchesStatus = status in readingFilters
 
-        // TIPO DE ARCHIVO
-        Text("Tipo de archivo", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(8.dp))
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FormatChip("Todo", selectedFormat == null) { onFormatChange(null) }
-            FormatChip("EPUB", selectedFormat == com.example.moby.models.PublicationFormat.EPUB) { onFormatChange(com.example.moby.models.PublicationFormat.EPUB) }
-            FormatChip("PDF", selectedFormat == com.example.moby.models.PublicationFormat.PDF) { onFormatChange(com.example.moby.models.PublicationFormat.PDF) }
-            FormatChip("CBZ", selectedFormat == com.example.moby.models.PublicationFormat.CBZ) { onFormatChange(com.example.moby.models.PublicationFormat.CBZ) }
+                matchesSearch && matchesFormat && matchesStatus
+            }.let { list ->
+                // Ordenamiento
+                when (sortBy) {
+                    SortBy.TITLE -> list.sortedBy { it.title }
+                    SortBy.AUTHOR -> list.sortedBy { it.author }
+                    SortBy.DATE_ADDED -> list.sortedByDescending { it.dateAdded }
+                }
+            }
         }
 
-        Spacer(Modifier.height(24.dp))
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Importando ${uris.size} libros...")
+                var importedCount = 0
 
-        // AGRUPACIÓN
-        Text("Agrupación", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(8.dp))
-        FilterOption("Agrupar por autor", groupByAuthor) { onGroupByAuthorChange(!groupByAuthor) }
+                uris.forEach { uri ->
+                    val fileName =
+                        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            cursor.moveToFirst()
+                            cursor.getString(nameIndex)
+                        } ?: "libro_${System.currentTimeMillis()}"
+
+                    // DETECCIÓN DE DUPLICADOS (En importación masiva, saltamos los duplicados silenciosamente para no saturar)
+                    val existing = publicationDao.getPublicationById(fileName)
+                    if (existing == null) {
+                        val newPublication = metadataExtractor.extract(uri, fileName)
+                        if (newPublication != null) {
+                            publicationDao.insertPublication(newPublication)
+                            importedCount++
+                        }
+                    }
+                }
+
+                snackbarHostState.showSnackbar("Importación finalizada: $importedCount nuevos libros añadidos")
+            }
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        containerColor = androidx.compose.ui.graphics.Color.Transparent
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            if (publications.isEmpty()) {
+                PlaceholderScreen(
+                    title = "Biblioteca Vacía",
+                    subtitle = "Usa el botón '+' para importar tus primeros libros (PDF, EPUB, CBZ)."
+                )
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${publications.size} libros",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            // BOTÓN DE FILTRO AVANZADO
+                            IconButton(onClick = { showFilterSheet = true }) {
+                                Icon(
+                                    imageVector = Icons.Filled.FilterList,
+                                    contentDescription = "Filtrar",
+                                    tint = if (selectedFormat != null || sortBy != SortBy.DATE_ADDED || readingFilters.size < 3)
+                                        MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground
+                                )
+                            }
+
+                            // BOTÓN DE VISTA (Solo icono rápido, el completo está en el panel)
+                            IconButton(onClick = {
+                                scope.launch {
+                                    val nextMode = when (viewMode) {
+                                        com.example.moby.data.LibraryViewMode.GRID -> com.example.moby.data.LibraryViewMode.SHELF
+                                        com.example.moby.data.LibraryViewMode.SHELF -> com.example.moby.data.LibraryViewMode.LIST
+                                        com.example.moby.data.LibraryViewMode.LIST -> com.example.moby.data.LibraryViewMode.GENRES
+                                        com.example.moby.data.LibraryViewMode.GENRES -> com.example.moby.data.LibraryViewMode.GRID
+                                    }
+                                    preferencesManager.setLibraryViewMode(nextMode)
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = when (viewMode) {
+                                        com.example.moby.data.LibraryViewMode.GRID -> Icons.Filled.GridView
+                                        com.example.moby.data.LibraryViewMode.SHELF -> Icons.Filled.TableRows
+                                        com.example.moby.data.LibraryViewMode.LIST -> Icons.Filled.ViewList
+                                        com.example.moby.data.LibraryViewMode.GENRES -> Icons.Filled.AutoAwesome
+                                    },
+                                    contentDescription = "Cambiar Vista Style"
+                                )
+                            }
+                        }
+                    }
+
+                    if (viewMode == com.example.moby.data.LibraryViewMode.GENRES) {
+                        val publicationsByGenre = remember(filteredPublications) {
+                            filteredPublications.groupBy { it.genre }
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 80.dp)
+                        ) {
+                            items(publicationsByGenre.keys.toList()) { genre ->
+                                com.example.moby.ui.components.GenreShelf(
+                                    genre = genre ?: "Desconocido",
+                                    books = publicationsByGenre[genre] ?: emptyList(),
+                                    onBookClick = { onNavigate(com.example.moby.MobyScreen.Reader(it.id)) },
+                                    onLongClick = {
+                                        publicationToEdit = it
+                                        showContextMenu = true
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        val groupedPublications = remember(filteredPublications, groupByAuthor) {
+                            if (groupByAuthor) {
+                                filteredPublications.groupBy { it.author }
+                            } else {
+                                mapOf("Todos los libros" to filteredPublications)
+                            }
+                        }
+
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 80.dp)
+                        ) {
+                            groupedPublications.forEach { (author, books) ->
+                                if (groupByAuthor) {
+                                    stickyHeader {
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                                        ) {
+                                            Text(
+                                                text = author,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(
+                                                    horizontal = 16.dp,
+                                                    vertical = 12.dp
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+
+                                when (viewMode) {
+                                    com.example.moby.data.LibraryViewMode.LIST -> {
+                                        items(books) { pub ->
+                                            com.example.moby.ui.components.PublicationListItem(
+                                                publication = pub,
+                                                onClick = { onNavigate(com.example.moby.MobyScreen.Reader(pub.id)) },
+                                                onLongClick = { 
+                                                    publicationToEdit = pub
+                                                    showContextMenu = true
+                                                }
+                                            )
+                                        }
+                                    }
+                                    com.example.moby.data.LibraryViewMode.GRID -> {
+                                        val itemsPerRow = 3
+                                        val chunked = books.chunked(itemsPerRow)
+                                        items(chunked) { rowBooks ->
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                            ) {
+                                                rowBooks.forEach { pub ->
+                                                    Box(modifier = Modifier.weight(1f)) {
+                                                        PublicationCard(
+                                                            publication = pub,
+                                                            onClick = { onNavigate(com.example.moby.MobyScreen.Reader(pub.id)) },
+                                                            onMenuClick = { 
+                                                                publicationToEdit = pub
+                                                                showContextMenu = true
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                                repeat(itemsPerRow - rowBooks.size) {
+                                                    Spacer(modifier = Modifier.weight(1f))
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                        }
+                                    }
+                                    com.example.moby.data.LibraryViewMode.SHELF -> {
+                                        val rows = books.chunked(3)
+                                        items(rows) { rowBooks ->
+                                            com.example.moby.ui.components.LibraryShelf(
+                                                books = rowBooks,
+                                                onBookClick = { onNavigate(com.example.moby.MobyScreen.Reader(it.id)) },
+                                                onMenuClick = { 
+                                                    publicationToEdit = it
+                                                    showContextMenu = true
+                                                }
+                                            )
+                                        }
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                    }
+                }
+
+                var fabExpanded by remember { mutableStateOf(false) }
+
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.End
+                ) {
+                    if (fabExpanded) {
+                        ExtendedFloatingActionButton(
+                            text = { Text("Limpiar Biblioteca") },
+                            icon = { Icon(Icons.Filled.Delete, contentDescription = "Clean") },
+                            onClick = {
+                                scope.launch { publicationDao.deleteAllPublications() }
+                                fabExpanded = false
+                            },
+                            modifier = Modifier.padding(bottom = 16.dp),
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            contentColor = MaterialTheme.colorScheme.onErrorContainer
+                        )
+
+                        ExtendedFloatingActionButton(
+                            text = { Text("Importar Libro") },
+                            icon = { Icon(Icons.Filled.Add, contentDescription = "Import") },
+                            onClick = {
+                                launcher.launch(
+                                    arrayOf(
+                                        "application/pdf",
+                                        "application/epub+zip",
+                                        "application/x-cbz",
+                                        "application/zip",
+                                        "application/octet-stream"
+                                    )
+                                )
+                                fabExpanded = false
+                            },
+                            modifier = Modifier.padding(bottom = 16.dp),
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+
+                    FloatingActionButton(
+                        onClick = { fabExpanded = !fabExpanded },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ) {
+                        Icon(
+                            if (fabExpanded) Icons.Filled.Close else Icons.Filled.Add,
+                            contentDescription = "Opciones"
+                        )
+                    }
+                }
+            }
+        }
+
+        if (showContextMenu && publicationToEdit != null) {
+            com.example.moby.ui.components.BookDetailsSheet(
+                publication = publicationToEdit!!,
+                onReadClick = {
+                    showContextMenu = false
+                    onNavigate(com.example.moby.MobyScreen.Reader(publicationToEdit!!.id))
+                    publicationToEdit = null
+                },
+                onChangeCoverClick = {
+                    showContextMenu = false
+                    coverPickerLauncher.launch("image/*")
+                },
+                onWebSearchClick = {
+                    showContextMenu = false
+                    showWebCoverSearch = true
+                },
+                onDeleteClick = {
+                    scope.launch {
+                        publicationDao.deletePublication(publicationToEdit!!)
+                        showContextMenu = false
+                        publicationToEdit = null
+                    }
+                },
+                onDismiss = {
+                    showContextMenu = false
+                    publicationToEdit = null
+                }
+            )
+        }
+
+        if (showWebCoverSearch && publicationToEdit != null) {
+            com.example.moby.ui.components.WebCoverBrowserDialog(
+                initialQuery = "${publicationToEdit!!.title} ${publicationToEdit!!.author}",
+                onDismiss = { showWebCoverSearch = false },
+                onImageSelected = { coverUrl ->
+                    scope.launch {
+                        val localPath =
+                            coverSearchService.downloadCover(coverUrl, publicationToEdit!!.id)
+                        if (localPath != null) {
+                            val updatedPub = publicationToEdit!!.copy(coverUrl = localPath)
+                            publicationDao.updatePublication(updatedPub)
+                            snackbarHostState.showSnackbar("Portada actualizada")
+                        } else {
+                            snackbarHostState.showSnackbar("Error al descargar la portada")
+                        }
+                        showWebCoverSearch = false
+                        publicationToEdit = null
+                    }
+                }
+            )
+        }
+
+        if (showFilterSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showFilterSheet = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+            ) {
+                LibraryAdvancedFilterPanel(
+                    sortBy = sortBy,
+                    onSortChange = { newSort -> sortBy = newSort },
+                    readingFilters = readingFilters,
+                    onReadingFiltersChange = { newFilters -> readingFilters = newFilters },
+                    viewMode = viewMode,
+                    onViewModeChange = { newMode ->
+                        scope.launch { preferencesManager.setLibraryViewMode(newMode) }
+                    },
+                    selectedFormat = selectedFormat,
+                    onFormatChange = { newFormat -> selectedFormat = newFormat },
+                    groupByAuthor = groupByAuthor,
+                    onGroupByAuthorChange = { newValue -> groupByAuthor = newValue }
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun SortOption(label: String, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().height(40.dp).clickable(onClick = onClick)
-    ) {
-        RadioButton(selected = selected, onClick = onClick, colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary))
-        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 8.dp))
-    }
-}
-
-@Composable
-private fun FilterOption(label: String, checked: Boolean, onCheckedChange: () -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().height(40.dp).clickable(onClick = onCheckedChange)
-    ) {
-        Checkbox(checked = checked, onCheckedChange = { onCheckedChange() }, colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary))
-        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = 8.dp))
-    }
-}
-
-@Composable
-private fun LayoutToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun ViewModeIcon(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
     Box(
-        modifier = modifier
-            .fillMaxHeight()
+        modifier = androidx.compose.ui.Modifier
+            .size(40.dp)
             .background(
-                if (selected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 RoundedCornerShape(20.dp)
             )
             .clickable(onClick = onClick),
@@ -641,6 +664,50 @@ private fun FormatChip(label: String, selected: Boolean, onClick: () -> Unit) {
             selectedLabelColor = MaterialTheme.colorScheme.onPrimary
         )
     )
+}
+
+@Composable
+private fun SortOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = androidx.compose.ui.Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .clickable(onClick = onClick)
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = onClick,
+            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = androidx.compose.ui.Modifier.padding(start = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun FilterOption(label: String, checked: Boolean, onCheckedChange: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = androidx.compose.ui.Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .clickable(onClick = onCheckedChange)
+    ) {
+        Checkbox(
+            checked = checked,
+            onCheckedChange = { onCheckedChange() },
+            colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = androidx.compose.ui.Modifier.padding(start = 8.dp)
+        )
+    }
 }
 
 

@@ -28,12 +28,22 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.moby.models.Publication
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PublicationCard(
     publication: Publication,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {},
+    onMenuClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -41,56 +51,46 @@ fun PublicationCard(
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
-                onLongClick = onLongClick
+                onLongClick = onMenuClick // También permitimos pulsación larga
             ),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
-        Column {
+        Box(modifier = Modifier.fillMaxWidth().aspectRatio(0.7f)) {
+            // Imagen de Portada
             AsyncImage(
                 model = publication.coverUrl,
                 contentDescription = "Portada de ${publication.title}",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(0.7f)
-                    .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
             
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = publication.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface
+            // Icono de Menú (Más opciones)
+            IconButton(
+                onClick = onMenuClick,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 6.dp, end = 4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "Opciones",
+                    tint = Color.White,
+                    modifier = Modifier.padding(4.dp)
                 )
-                Text(
-                    text = publication.author,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            }
+
+            // Barra de Progreso Integrada al fondo
+            if (publication.totalPages > 0 && publication.currentPosition > 0) {
+                LinearProgressIndicator(
+                    progress = { publication.progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .align(Alignment.BottomCenter),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = Color.Black.copy(alpha = 0.3f)
                 )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                if (publication.totalPages > 0) {
-                    val progress = publication.progress
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp)),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                    )
-                }
             }
         }
     }
