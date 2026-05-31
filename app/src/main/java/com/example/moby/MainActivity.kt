@@ -17,6 +17,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.EaseInOutQuad
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.example.moby.data.db.MobyDatabase
 import com.example.moby.logic.BookMetadataExtractor
@@ -122,27 +130,59 @@ class MainActivity : ComponentActivity() {
                         }
 
                         Box(modifier = modifier) {
-                            when (currentScreen) {
-                                MobyScreen.Home -> HomeScreen(
-                                    isAbisal = isAbisal,
-                                    publicationDao = database.publicationDao(),
-                                    searchQuery = searchQuery,
-                                    onNavigate = { screen -> currentScreen = screen }
-                                )
-                                MobyScreen.Library -> LibraryScreen(
-                                    publicationDao = database.publicationDao(),
-                                    metadataExtractor = metadataExtractor,
-                                    preferencesManager = preferencesManager,
-                                    searchQuery = searchQuery,
-                                    onNavigate = { screen -> currentScreen = screen }
-                                )
-                                MobyScreen.Bookmarks -> BookmarksScreen ()
-                                MobyScreen.Journal -> JournalScreen()
-                                is MobyScreen.Reader -> ReaderScreen(
-                                    publicationId = (currentScreen as MobyScreen.Reader).publicationId,
-                                    onBack = { currentScreen = MobyScreen.Library },
-                                    isAbisal = isAbisal,
-                                    preferencesManager = preferencesManager)//  PASS MEMORY
+                            AnimatedContent(
+                                targetState = currentScreen,
+                                transitionSpec = {
+                                    val initialOrder = when (initialState) {
+                                        MobyScreen.Home -> 0
+                                        MobyScreen.Library -> 1
+                                        MobyScreen.Bookmarks -> 2
+                                        MobyScreen.Journal -> 3
+                                        is MobyScreen.Reader -> 4
+                                    }
+                                    val targetOrder = when (targetState) {
+                                        MobyScreen.Home -> 0
+                                        MobyScreen.Library -> 1
+                                        MobyScreen.Bookmarks -> 2
+                                        MobyScreen.Journal -> 3
+                                        is MobyScreen.Reader -> 4
+                                    }
+                                    
+                                    if (targetState is MobyScreen.Reader || initialState is MobyScreen.Reader) {
+                                        fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
+                                    } else if (targetOrder > initialOrder) {
+                                        (slideInHorizontally(animationSpec = tween(400, easing = EaseInOutQuad)) { it } + fadeIn(animationSpec = tween(400)))
+                                            .togetherWith(slideOutHorizontally(animationSpec = tween(400, easing = EaseInOutQuad)) { -it } + fadeOut(animationSpec = tween(400)))
+                                    } else {
+                                        (slideInHorizontally(animationSpec = tween(400, easing = EaseInOutQuad)) { -it } + fadeIn(animationSpec = tween(400)))
+                                            .togetherWith(slideOutHorizontally(animationSpec = tween(400, easing = EaseInOutQuad)) { it } + fadeOut(animationSpec = tween(400)))
+                                    }
+                                },
+                                label = "ScreenNavigation"
+                            ) { screen ->
+                                when (screen) {
+                                    MobyScreen.Home -> HomeScreen(
+                                        isAbisal = isAbisal,
+                                        publicationDao = database.publicationDao(),
+                                        searchQuery = searchQuery,
+                                        onNavigate = { screen -> currentScreen = screen }
+                                    )
+                                    MobyScreen.Library -> LibraryScreen(
+                                        publicationDao = database.publicationDao(),
+                                        metadataExtractor = metadataExtractor,
+                                        preferencesManager = preferencesManager,
+                                        searchQuery = searchQuery,
+                                        onNavigate = { screen -> currentScreen = screen }
+                                    )
+                                    MobyScreen.Bookmarks -> BookmarksScreen()
+                                    MobyScreen.Journal -> JournalScreen()
+                                    is MobyScreen.Reader -> ReaderScreen(
+                                        publicationId = screen.publicationId,
+                                        onBack = { currentScreen = MobyScreen.Library },
+                                        isAbisal = isAbisal,
+                                        preferencesManager = preferencesManager
+                                    )
+                                }
                             }
                         }
                     }

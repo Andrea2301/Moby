@@ -7,6 +7,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -22,9 +23,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.moby.data.db.MobyDatabase
@@ -81,6 +85,7 @@ fun ReaderScreen(
     var lineSpacing: Float by remember { mutableFloatStateOf(savedLineSpacing) }
     var brightness: Float by remember { mutableFloatStateOf(savedBrightness) }
     var showSettings: Boolean by remember { mutableStateOf(false) }
+    var showSearchDialog by remember { mutableStateOf(false) }
     var isSmartFitEnabled: Boolean by remember { mutableStateOf(false) }
     var isTextReflowEnabled: Boolean by remember { mutableStateOf(false) }
     var isVerticalMode: Boolean by remember { mutableStateOf(false) }
@@ -382,73 +387,114 @@ fun ReaderScreen(
                             }
                         }
                         2 -> {
-                            // Filtramos las que tienen NOTA
-                            val userNotes = bookmarks.filter { !it.note.isNullOrEmpty() }
-                            
-                            if (userNotes.isEmpty()) {
-                                Box(modifier = Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                                        Icon(Icons.Default.EditNote, contentDescription = null, modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        Text("Tus Reflexiones", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                        Text("Aquí aparecerán tus pensamientos sobre el libro.", color = Color.Gray, style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                                    }
-                                }
-                            } else {
-                                androidx.compose.foundation.lazy.LazyColumn(
-                                    modifier = Modifier.fillMaxSize().navigationBarsPadding(),
-                                    contentPadding = PaddingValues(16.dp),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        // Filter notes that have a user note attached
+                        val userNotes = bookmarks.filter { !it.note.isNullOrEmpty() }
+
+                        if (userNotes.isEmpty()) {
+                            // Empty state with illustration and description
+                            Box(
+                                modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.padding(32.dp)
                                 ) {
-                                    items(userNotes.size) { index ->
-                                        val note = userNotes[index]
-                                        Surface(
-                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
-                                            shape = RoundedCornerShape(20.dp),
-                                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                                            modifier = Modifier.fillMaxWidth().clickable {
+                                    Icon(
+                                        Icons.Default.EditNote,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(64.dp),
+                                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        "Tus Reflexiones",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        "Aquí aparecerán tus pensamientos sobre el libro.",
+                                        color = Color.Gray,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        } else {
+                            // List of notes with rich cards
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize().navigationBarsPadding(),
+                                contentPadding = PaddingValues(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(userNotes.size) { index ->
+                                    val note = userNotes[index]
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        shape = RoundedCornerShape(16.dp),
+                                        tonalElevation = 2.dp,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                // Navigate to the chapter of the note
                                                 val chapterIdx = chapterPaths.indexOfFirst { it.contains(note.chapterPath.substringAfterLast("/")) }
                                                 if (chapterIdx != -1) progressUpdateHandler(chapterIdx)
-                                                showChapterList = false 
+                                                showChapterList = false
                                                 showControls = false
                                             }
-                                        ) {
-                                            Column(modifier = Modifier.padding(16.dp)) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Icon(Icons.Default.StickyNote2, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text(note.chapterPath.substringAfterLast("/").substringBeforeLast("."), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                                                }
-                                                Spacer(modifier = Modifier.height(12.dp))
-                                                // El comentario del usuario (Lo más importante)
-                                                Text(
-                                                    text = note.note ?: "",
-                                                    style = MaterialTheme.typography.bodyLarge,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurface
+                                    ) {
+                                        Column(modifier = Modifier.padding(16.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                // Color indicator dot
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(12.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color(android.graphics.Color.parseColor(note.colorHex)))
                                                 )
-                                                Spacer(modifier = Modifier.height(12.dp))
-                                                // El texto original del libro (Previsualización)
-                                                Surface(
-                                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    modifier = Modifier.fillMaxWidth()
-                                                ) {
-                                                    Text(
-                                                        text = "“${note.selectedText}”",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        modifier = Modifier.padding(8.dp),
-                                                        color = Color.Gray,
-                                                        maxLines = 2,
-                                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                                    )
-                                                }
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    note.chapterPath.substringAfterLast("/").substringBeforeLast("."),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Spacer(modifier = Modifier.weight(1f))
+                                                // Timestamp
+                                                Text(
+                                                    java.text.SimpleDateFormat("dd MMM, yyyy", java.util.Locale.getDefault()).format(java.util.Date(note.createdAt)),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color.Gray
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            // User note content
+                                            Text(
+                                                note.note ?: "",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            // Original selected text preview
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "“${note.selectedText}”",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    modifier = Modifier.padding(8.dp),
+                                                    color = Color.Gray,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+                    }
                     }
                 }
             }
@@ -622,9 +668,24 @@ fun ReaderScreen(
                         dao.updateWebtoonMode(pub.id, enabled)
                     }
                 },
-                isPdf = pub.format == PublicationFormat.PDF
+                isPdf = pub.format == PublicationFormat.PDF,
+                onSearchClick = {
+                    showSearchDialog = true
+                    showSettings = false
+                }
             )
         }
+
+        SearchInBookDialog(
+            show = showSearchDialog,
+            onDismiss = { showSearchDialog = false },
+            filePath = pub.filePath,
+            chapterPaths = chapterPaths,
+            onResultClick = { chapterIndex ->
+                progressUpdateHandler(chapterIndex)
+                showSearchDialog = false
+            }
+        )
     }
 }
 
@@ -650,18 +711,12 @@ fun ReaderSettingsBottomPanel(
     onRtlChange: (Boolean) -> Unit = {},
     isWebtoonMode: Boolean = false,
     onWebtoonChange: (Boolean) -> Unit = {},
-    isPdf: Boolean = false
+    isPdf: Boolean = false,
+    onSearchClick: () -> Unit = {}
 ) {
     var currentView by remember { mutableStateOf("main") }
-    val isDark = theme == ReaderTheme.ABISAL || theme == ReaderTheme.ONYX
-    val panelBg = when (theme) {
-        ReaderTheme.ARRECIFE -> Color(0xFFF8F9FA)
-        ReaderTheme.CRETA -> Color(0xFFF4ECD8)
-        ReaderTheme.PAPIRUS -> Color(0xFFD2D2D2)
-        ReaderTheme.ABISAL -> Color(0xFF011627)
-        ReaderTheme.ONYX -> Color.Black
-    }
-    val contentColor = if (isDark) Color.White else Color.Black
+    val panelBg = MaterialTheme.colorScheme.surface
+    val contentColor = MaterialTheme.colorScheme.onSurface
 
     Surface(
         modifier = Modifier
@@ -698,7 +753,8 @@ fun ReaderSettingsBottomPanel(
                         isWebtoonMode = isWebtoonMode,
                         onWebtoonChange = onWebtoonChange,
                         isPdf = isPdf,
-                        onNavigateToAdvanced = { currentView = "advanced" }
+                        onNavigateToAdvanced = { currentView = "advanced" },
+                        onSearchClick = onSearchClick
                     )
                     "advanced" -> AdvancedSettingsView(
                         fontFamily = fontFamily,
@@ -733,7 +789,8 @@ fun MainSettingsView(
     isWebtoonMode: Boolean,
     onWebtoonChange: (Boolean) -> Unit,
     isPdf: Boolean,
-    onNavigateToAdvanced: () -> Unit
+    onNavigateToAdvanced: () -> Unit,
+    onSearchClick: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -792,7 +849,7 @@ fun MainSettingsView(
 
             // SMALL ACTION CARDS COLUMN
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                SmallActionCard(Icons.Default.Search, "Search")
+                SmallActionCard(Icons.Default.Search, "Buscar", onClick = onSearchClick)
                 SmallActionCard(
                     if (isVerticalMode || isWebtoonMode) Icons.Default.SwapVert else Icons.Default.SwapHoriz,
                     "Orientation",
@@ -869,8 +926,8 @@ fun AdvancedSettingsView(
                     style = MaterialTheme.typography.bodyMedium,
                     color = contentColor,
                     fontFamily = when(fontFamily) {
-                        "Serif" -> FontFamily.Serif
-                        "Sans" -> FontFamily.SansSerif
+                        "Lora", "Merriweather", "Serif" -> FontFamily.Serif
+                        "Inter", "Sans" -> FontFamily.SansSerif
                         "Mono" -> FontFamily.Monospace
                         else -> FontFamily.Default
                     },
@@ -883,21 +940,30 @@ fun AdvancedSettingsView(
         Text("Select Font", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
         Spacer(modifier = Modifier.height(12.dp))
         
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            listOf("Serif", "Sans", "Mono").forEach { font ->
+        val fontScrollState = androidx.compose.foundation.rememberScrollState()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(fontScrollState),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            listOf("Original", "Lora", "Merriweather", "Inter", "Serif", "Sans", "Mono").forEach { font ->
+                val isSelected = fontFamily == font
                 Surface(
-                    color = if (fontFamily == font) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
+                    color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
                     shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.weight(1f).clickable { onFontFamilyChange(font) }
+                    modifier = Modifier
+                        .width(110.dp)
+                        .clickable { onFontFamilyChange(font) }
                 ) {
                     Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Aa", fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = when(font) {
-                            "Serif" -> FontFamily.Serif
-                            "Sans" -> FontFamily.SansSerif
+                            "Lora", "Merriweather", "Serif" -> FontFamily.Serif
+                            "Inter", "Sans" -> FontFamily.SansSerif
                             "Mono" -> FontFamily.Monospace
                             else -> FontFamily.Default
                         })
-                        Text(font, style = MaterialTheme.typography.labelSmall)
+                        Text(font, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -1036,5 +1102,296 @@ fun AdvancedToggleRow(label: String, selected: Boolean, onToggle: (Boolean) -> U
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Switch(checked = selected, onCheckedChange = onToggle)
+    }
+}
+
+// --- EPUB IN-BOOK SEARCH ENGINE & UI ---
+
+data class EpubSearchResult(
+    val chapterIndex: Int,
+    val chapterName: String,
+    val previewText: String,
+    val matchWord: String
+)
+
+suspend fun searchInEpub(
+    filePath: String,
+    chapterPaths: List<String>,
+    query: String
+): List<EpubSearchResult> = withContext(Dispatchers.IO) {
+    val results = mutableListOf<EpubSearchResult>()
+    if (query.isBlank()) return@withContext results
+    
+    try {
+        val zip = java.util.zip.ZipFile(java.io.File(filePath))
+        // 1. Obtener la ruta base OPF del contenedor
+        val containerEntry = zip.getEntry("META-INF/container.xml")
+        val opfDir = if (containerEntry != null) {
+            val cxml = zip.getInputStream(containerEntry).bufferedReader().readText()
+            val opfP = """<rootfile[^>]+full-path="([^"]+)"""".toRegex().find(cxml)?.groupValues?.get(1) ?: ""
+            if (opfP.contains("/")) opfP.substringBeforeLast("/") + "/" else ""
+        } else ""
+
+        chapterPaths.forEachIndexed { index, relPath ->
+            val decodedPath = android.net.Uri.decode(relPath)
+            val internalPath = opfDir + decodedPath
+            val entry = zip.getEntry(internalPath) ?: zip.getEntry(decodedPath) ?: zip.getEntry(relPath)
+            if (entry != null) {
+                val rawHtml = zip.getInputStream(entry).bufferedReader().readText()
+                val bodyText = Regex("(?si)<body[^>]*>(.*?)</body>").find(rawHtml)?.groupValues?.get(1) ?: rawHtml
+                val cleanText = bodyText
+                    .replace(Regex("(?s)<script.*?</script>"), "")
+                    .replace(Regex("(?s)<style.*?</style>"), "")
+                    .replace(Regex("<[^>]*>"), " ")
+                    .replace(Regex("&nbsp;"), " ")
+                    .replace(Regex("\\s+"), " ")
+                    .trim()
+                
+                var startIndex = 0
+                while (true) {
+                    val foundIndex = cleanText.indexOf(query, startIndex, ignoreCase = true)
+                    if (foundIndex == -1) break
+                    
+                    val snippetStart = maxOf(0, foundIndex - 40)
+                    val snippetEnd = minOf(cleanText.length, foundIndex + query.length + 40)
+                    val prefix = if (snippetStart > 0) "..." else ""
+                    val suffix = if (snippetEnd < cleanText.length) "..." else ""
+                    
+                    val rawSnippet = cleanText.substring(snippetStart, snippetEnd)
+                    val preview = prefix + rawSnippet.trim() + suffix
+                    
+                    val chapterName = decodedPath.substringAfterLast("/").substringBeforeLast(".")
+                        .replace("_", " ")
+                        .replace("-", " ")
+                        .replaceFirstChar { if (it.isLowerCase()) it.titlecase(java.util.Locale.getDefault()) else it.toString() }
+
+                    results.add(
+                        EpubSearchResult(
+                            chapterIndex = index,
+                            chapterName = "Capítulo ${index + 1}: $chapterName",
+                            previewText = preview,
+                            matchWord = query
+                        )
+                    )
+                    
+                    startIndex = foundIndex + query.length
+                    if (results.size >= 150) break
+                }
+            }
+            if (results.size >= 150) return@forEachIndexed
+        }
+        zip.close()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return@withContext results
+}
+
+@Composable
+fun HighlightedSearchText(text: String, query: String, color: Color) {
+    val annotatedString = remember(text, query) {
+        androidx.compose.ui.text.buildAnnotatedString {
+            var startIndex = 0
+            while (true) {
+                val foundIndex = text.indexOf(query, startIndex, ignoreCase = true)
+                if (foundIndex == -1) {
+                    append(text.substring(startIndex))
+                    break
+                }
+                
+                append(text.substring(startIndex, foundIndex))
+                
+                pushStyle(
+                    androidx.compose.ui.text.SpanStyle(
+                        fontWeight = FontWeight.Bold,
+                        background = color.copy(alpha = 0.25f),
+                        color = color
+                    )
+                )
+                append(text.substring(foundIndex, foundIndex + query.length))
+                pop()
+                
+                startIndex = foundIndex + query.length
+            }
+        }
+    }
+    Text(text = annotatedString, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchInBookDialog(
+    show: Boolean,
+    onDismiss: () -> Unit,
+    filePath: String,
+    chapterPaths: List<String>,
+    onResultClick: (Int) -> Unit
+) {
+    if (!show) return
+
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<EpubSearchResult>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp)
+            ) {
+                // Cabecera
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Buscar en el libro",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Campo de texto de búsqueda
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text("Escribe una frase o palabra...") },
+                    leadingIcon = { Icon(Icons.Default.Search, null, tint = Color.Gray) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }) {
+                                Icon(Icons.Default.Clear, null, tint = Color.Gray)
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                        imeAction = androidx.compose.ui.text.input.ImeAction.Search
+                    ),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                        onSearch = {
+                            if (query.isNotBlank()) {
+                                isSearching = true
+                                scope.launch {
+                                    results = searchInEpub(filePath, chapterPaths, query)
+                                    isSearching = false
+                                }
+                            }
+                        }
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Cantidad de coincidencias
+                if (!isSearching && results.isNotEmpty()) {
+                    Text(
+                        text = "Coincidencias encontradas (${results.size})",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                }
+
+                // Área principal de resultados
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSearching) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Buscando en los capítulos...", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                        }
+                    } else if (results.isEmpty()) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.padding(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MenuBook,
+                                contentDescription = null,
+                                modifier = Modifier.size(72.dp),
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = if (query.isEmpty()) "Ingresa una palabra para buscar" else "No se encontraron resultados",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (query.isEmpty()) "Busca esa frase especial que se te haya quedado en la memoria." else "Intenta con términos más cortos o revisa la ortografía.",
+                                color = Color.Gray,
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+                    } else {
+                        androidx.compose.foundation.lazy.LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            items(results.size) { index ->
+                                val result = results[index]
+                                Surface(
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onResultClick(result.chapterIndex)
+                                        }
+                                ) {
+                                    Column(modifier = Modifier.padding(16.dp)) {
+                                        Text(
+                                            text = result.chapterName,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        
+                                        HighlightedSearchText(
+                                            text = result.previewText,
+                                            query = result.matchWord,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

@@ -3,6 +3,8 @@ package com.example.moby.logic.readers
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -19,7 +21,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.StickyNote2
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.StickyNote2
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import com.example.moby.models.BookAnnotation
 import kotlinx.coroutines.Dispatchers
@@ -49,7 +58,8 @@ fun EpubReaderComponent(
     isVerticalMode: Boolean,
     theme: ReaderTheme,
     onCenterTap: () -> Unit,
-    onToggleBookmarkRequested: ((() -> Unit) -> Unit)? = null
+    onToggleBookmarkRequested: ((() -> Unit) -> Unit)? = null,
+    activeSearchQuery: String? = null
 ) {
     var chapters by remember { mutableStateOf<List<String>>(emptyList()) }
     var opfDir by remember { mutableStateOf("") }
@@ -202,7 +212,8 @@ fun EpubReaderComponent(
                 },
                 onCenterTap = onCenterTap,
                 chapterTotalPages = chapterPageCounts[page] ?: 1,
-                onToggleBookmarkRequested = if (page == pagerState.currentPage) onToggleBookmarkRequested else null
+                onToggleBookmarkRequested = if (page == pagerState.currentPage) onToggleBookmarkRequested else null,
+                activeSearchQuery = if (page == pagerState.currentPage) activeSearchQuery else null
             )
         }
     }
@@ -225,7 +236,8 @@ fun EpubChapterRender(
     onCenterTap: () -> Unit,
     onVirtualPageCountReady: (Int) -> Unit,
     chapterTotalPages: Int,
-    onToggleBookmarkRequested: ((() -> Unit) -> Unit)? = null
+    onToggleBookmarkRequested: ((() -> Unit) -> Unit)? = null,
+    activeSearchQuery: String? = null
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -326,6 +338,8 @@ fun EpubChapterRender(
                     WebView(ctx).apply {
                         layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        isVerticalScrollBarEnabled = false
+                        isHorizontalScrollBarEnabled = false
                         settings.apply { 
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -469,53 +483,231 @@ fun EpubChapterRender(
         }
 
         if (showNoteDialog) {
+            val noteColors = listOf(
+                Color(0xFFFFB7B2), // Peach Pink
+                Color(0xFFFFF275), // Soft Yellow
+                Color(0xFFB5EAD7), // Mint Green
+                Color(0xFFC7CEEA), // Pastel Blue
+                Color(0xFFD8B4F8), // Lavender
+                Color(0xFFFFC6FF)  // Light Coral
+            )
+            var selectedColor by remember { mutableStateOf(noteColors[1]) } // Default yellow
+            
             androidx.compose.ui.window.Dialog(onDismissRequest = { showNoteDialog = false }) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 6.dp
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(modifier = Modifier.padding(24.dp)) {
-                        Text("Nueva Nota", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Surface(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                            Text(text = "“$selectionText”", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp), color = Color.Gray, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    // 1. THE STICKY NOTE CARD (Tarjeta Adhesiva)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .shadow(
+                                elevation = 16.dp,
+                                shape = RoundedCornerShape(24.dp),
+                                ambientColor = Color.Black.copy(alpha = 0.15f),
+                                spotColor = Color.Black.copy(alpha = 0.15f)
+                            ),
+                        shape = RoundedCornerShape(24.dp),
+                        color = selectedColor,
+                        contentColor = Color(0xFF2C3E50) // Deep Slate text for readability
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(20.dp)
+                        ) {
+                            // Header inside sticky note: small icon + placeholder style
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.StickyNote2,
+                                    contentDescription = null,
+                                    tint = Color(0xFF2C3E50).copy(alpha = 0.5f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Añadir texto a esta nota",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF2C3E50).copy(alpha = 0.5f)
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(10.dp))
+                            
+                            // Large borderless text field inside the sticky note
+                            TextField(
+                                value = noteText,
+                                onValueChange = { noteText = it },
+                                placeholder = { 
+                                    Text(
+                                        "Escribe tus pensamientos aquí...", 
+                                        color = Color(0xFF2C3E50).copy(alpha = 0.4f),
+                                        style = MaterialTheme.typography.bodyLarge
+                                    ) 
+                                },
+                                modifier = Modifier.fillMaxSize(),
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    disabledContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    focusedTextColor = Color(0xFF2C3E50),
+                                    unfocusedTextColor = Color(0xFF2C3E50)
+                                ),
+                                textStyle = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium)
+                            )
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        OutlinedTextField(
-                            value = noteText,
-                            onValueChange = { noteText = it },
-                            placeholder = { Text("Escribe tus pensamientos aquí...") },
-                            modifier = Modifier.fillMaxWidth().height(120.dp),
-                            shape = RoundedCornerShape(16.dp)
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = { showNoteDialog = false }) { Text("Cancelar") }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = {
-                                    val annotation = BookAnnotation(
-                                        publicationId = publicationId,
-                                        chapterPath = internalPath,
-                                        cfiInfo = selectionCfi,
-                                        selectedText = selectionText,
-                                        colorHex = "#FFD600",
-                                        note = noteText
-                                    )
-                                    scope.launch(Dispatchers.IO) {
-                                        dao.insertAnnotation(annotation)
-                                        withContext(Dispatchers.Main) {
-                                            annotations.add(annotation)
-                                            webViewRef.value?.evaluateJavascript("mobyApplyHighlight(`${selectionCfi}`, '#FFD600');", null)
-                                            webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
-                                            showNoteDialog = false
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // 2. CONTROL PANEL (Panel de control del color y texto)
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .shadow(
+                                elevation = 12.dp,
+                                shape = RoundedCornerShape(24.dp),
+                                ambientColor = Color.Black.copy(alpha = 0.08f),
+                                spotColor = Color.Black.copy(alpha = 0.12f)
+                            ),
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 4.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp)
+                        ) {
+                            // Header: Color de la nota
+                            Text(
+                                text = "Color de la nota",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+                            
+                            // Color row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                noteColors.forEach { color ->
+                                    val isSelected = selectedColor == color
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(androidx.compose.foundation.shape.CircleShape)
+                                            .background(color)
+                                            .border(
+                                                width = if (isSelected) 3.dp else 1.dp,
+                                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.08f),
+                                                shape = androidx.compose.foundation.shape.CircleShape
+                                            )
+                                            .clickable { selectedColor = color },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
                                         }
                                     }
-                                },
-                                shape = RoundedCornerShape(12.dp)
-                            ) { Text("Guardar Nota") }
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            // Header: Texto citado
+                            Text(
+                                text = "Texto citado",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            
+                            // Citation Block
+                            Surface(
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "“$selectionText”",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(12.dp),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    maxLines = 3,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                            
+                            Spacer(modifier = Modifier.height(20.dp))
+                            
+                            // Save and Cancel buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    onClick = { showNoteDialog = false },
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Cancelar", fontWeight = FontWeight.SemiBold)
+                                }
+                                
+                                Spacer(modifier = Modifier.width(8.dp))
+                                
+                                Button(
+                                    onClick = {
+                                        val colorHex = String.format("#%06X", (0xFFFFFF and selectedColor.toArgb()))
+                                        val annotation = BookAnnotation(
+                                            publicationId = publicationId,
+                                            chapterPath = internalPath,
+                                            cfiInfo = selectionCfi,
+                                            selectedText = selectionText,
+                                            colorHex = colorHex,
+                                            note = noteText
+                                        )
+                                        scope.launch(Dispatchers.IO) {
+                                            dao.insertAnnotation(annotation)
+                                            withContext(Dispatchers.Main) {
+                                                annotations.add(annotation)
+                                                webViewRef.value?.evaluateJavascript("mobyApplyHighlight(`${selectionCfi}`, '$colorHex');", null)
+                                                webViewRef.value?.evaluateJavascript("window.getSelection().removeAllRanges();", null)
+                                                showNoteDialog = false
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Guardar", fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }

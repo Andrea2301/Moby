@@ -147,6 +147,13 @@ class BookMetadataExtractor(private val context: Context) {
         val genre: String?
     )
 
+    private fun parseXml(inputStream: InputStream): org.w3c.dom.Document {
+        val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        val builder = factory.newDocumentBuilder()
+        return builder.parse(inputStream)
+    }
+
     private fun extractEpubMetadata(file: File): EpubMetadata {
         var title: String? = null
         var author: String? = null
@@ -156,61 +163,122 @@ class BookMetadataExtractor(private val context: Context) {
         try {
             java.util.zip.ZipFile(file).use { zip ->
                 val containerEntry = zip.getEntry("META-INF/container.xml") ?: return EpubMetadata(null, null, null, null)
-                val containerXml = zip.getInputStream(containerEntry).bufferedReader().readText()
+                val containerDoc = zip.getInputStream(containerEntry).use { parseXml(it) }
                 
-                val rootFileRegex = """<rootfile[^>]+full-path="([^"]+)"""".toRegex()
-                val opfPath = rootFileRegex.find(containerXml)?.groupValues?.get(1) ?: return EpubMetadata(null, null, null, null)
+                val rootFileElements = containerDoc.getElementsByTagName("rootfile")
+                val rootFileElement = if (rootFileElements.length > 0) {
+                    rootFileElements.item(0) as org.w3c.dom.Element
+                } else {
+                    val rootFiles = containerDoc.getElementsByTagNameNS("*", "rootfile")
+                    if (rootFiles.length > 0) rootFiles.item(0) as org.w3c.dom.Element else null
+                } ?: return EpubMetadata(null, null, null, null)
+                
+                val opfPath = rootFileElement.getAttribute("full-path")
+                if (opfPath.isNullOrEmpty()) return EpubMetadata(null, null, null, null)
                 
                 val opfEntry = zip.getEntry(opfPath) ?: return EpubMetadata(null, null, null, null)
-                val opfXml = zip.getInputStream(opfEntry).bufferedReader().readText()
+                val opfDoc = zip.getInputStream(opfEntry).use { parseXml(it) }
                 
-                val titleRegex = """<dc:title[^>]*>(.*?)</dc:title>""".toRegex()
-                title = titleRegex.find(opfXml)?.groupValues?.get(1)
+                // 1. Extract Title
+                var titleElement: org.w3c.dom.Element? = null
+                val titleElements = opfDoc.getElementsByTagName("dc:title")
+                if (titleElements.length > 0) {
+                    titleElement = titleElements.item(0) as org.w3c.dom.Element
+                } else {
+                    val titles = opfDoc.getElementsByTagNameNS("*", "title")
+                    if (titles.length > 0) {
+                        titleElement = titles.item(0) as org.w3c.dom.Element
+                    }
+                }
+                title = titleElement?.textContent?.trim()
                 
-                val creatorRegex = """<dc:creator[^>]*>(.*?)</dc:creator>""".toRegex()
-                author = creatorRegex.find(opfXml)?.groupValues?.get(1)
+                // 2. Extract Author
+                var creatorElement: org.w3c.dom.Element? = null
+                val creatorElements = opfDoc.getElementsByTagName("dc:creator")
+                if (creatorElements.length > 0) {
+                    creatorElement = creatorElements.item(0) as org.w3c.dom.Element
+                } else {
+                    val creators = opfDoc.getElementsByTagNameNS("*", "creator")
+                    if (creators.length > 0) {
+                        creatorElement = creators.item(0) as org.w3c.dom.Element
+                    }
+                }
+                author = creatorElement?.textContent?.trim()
 
-                val subjectRegex = """<dc:subject[^>]*>(.*?)</dc:subject>""".toRegex()
-                genre = subjectRegex.find(opfXml)?.groupValues?.get(1)
+                // 3. Extract Subject (Genre)
+                var subjectElement: org.w3c.dom.Element? = null
+                val subjectElements = opfDoc.getElementsByTagName("dc:subject")
+                if (subjectElements.length > 0) {
+                    subjectElement = subjectElements.item(0) as org.w3c.dom.Element
+                } else {
+                    val subjects = opfDoc.getElementsByTagNameNS("*", "subject")
+                    if (subjects.length > 0) {
+                        subjectElement = subjects.item(0) as org.w3c.dom.Element
+                    }
+                }
+                genre = subjectElement?.textContent?.trim()
                 
-                val coverMetaRegex = """<meta[^>]+name="cover"[^>]+content="([^"]+)"""".toRegex(RegexOption.IGNORE_CASE)
-                val coverIdMatch = coverMetaRegex.find(opfXml)
+                // 4. Extract Cover ID from meta tags
+                var coverId: String? = null
+                val metaElements = opfDoc.getElementsByTagName("meta")
+                for (i in 0 until metaElements.length) {
+                    val meta = metaElements.item(i) as org.w3c.dom.Element
+                    if (meta.getAttribute("name") == "cover") {
+                        coverId = meta.getAttribute("content")
+                        break
+                    }
+                }
+                if (coverId == null) {
+                    val metaNsElements = opfDoc.getElementsByTagNameNS("*", "meta")
+                    for (i in 0 until metaNsElements.length) {
+                        val meta = metaNsElements.item(i) as org.w3c.dom.Element
+                        if (meta.getAttribute("name") == "cover") {
+                            coverId = meta.getAttribute("content")
+                            break
+                        }
+                    }
+                }
+                
+                // 5. Gather item tags under manifest
                 var coverHref: String? = null
-                
-                if (coverIdMatch != null) {
-                    val coverId = coverIdMatch.groupValues[1]
-                    val itemRegex = """<item[^>]+>""".toRegex()
-                    for (match in itemRegex.findAll(opfXml)) {
-                        val itemStr = match.value
-                        if (itemStr.contains("""id="$coverId"""") || itemStr.contains("""id='$coverId'""")) {
-                            val hrefRegex = """href="([^"]+)"""".toRegex()
-                            coverHref = hrefRegex.find(itemStr)?.groupValues?.get(1)
+                val itemsList = mutableListOf<org.w3c.dom.Element>()
+                val itemElements = opfDoc.getElementsByTagName("item")
+                for (i in 0 until itemElements.length) {
+                    itemsList.add(itemElements.item(i) as org.w3c.dom.Element)
+                }
+                val itemNsElements = opfDoc.getElementsByTagNameNS("*", "item")
+                for (i in 0 until itemNsElements.length) {
+                    itemsList.add(itemNsElements.item(i) as org.w3c.dom.Element)
+                }
+
+                // Fallback 1: match coverId
+                if (coverId != null) {
+                    for (item in itemsList) {
+                        if (item.getAttribute("id") == coverId) {
+                            coverHref = item.getAttribute("href")
                             break
                         }
                     }
                 }
-                
+
+                // Fallback 2: match properties="cover-image"
                 if (coverHref == null) {
-                    // Fallback 1: properties="cover-image"
-                    val itemRegex = """<item[^>]+>""".toRegex()
-                    for (match in itemRegex.findAll(opfXml)) {
-                        val itemStr = match.value
-                        if (itemStr.contains("""properties="cover-image"""")) {
-                            val hrefRegex = """href="([^"]+)"""".toRegex()
-                            coverHref = hrefRegex.find(itemStr)?.groupValues?.get(1)
+                    for (item in itemsList) {
+                        if (item.getAttribute("properties").contains("cover-image")) {
+                            coverHref = item.getAttribute("href")
                             break
                         }
                     }
                 }
-                
+
+                // Fallback 3: match ID/href containing "cover" and having image media-type
                 if (coverHref == null) {
-                    // Fallback 2: Any item that looks like a cover image
-                    val itemRegex = """<item[^>]+>""".toRegex()
-                    for (match in itemRegex.findAll(opfXml)) {
-                        val itemStr = match.value
-                        if (itemStr.lowercase().contains("cover") && itemStr.contains("image/")) {
-                            val hrefRegex = """href="([^"]+)"""".toRegex()
-                            coverHref = hrefRegex.find(itemStr)?.groupValues?.get(1)
+                    for (item in itemsList) {
+                        val id = item.getAttribute("id").lowercase()
+                        val href = item.getAttribute("href").lowercase()
+                        val mediaType = item.getAttribute("media-type").lowercase()
+                        if ((id.contains("cover") || href.contains("cover")) && mediaType.startsWith("image/")) {
+                            coverHref = item.getAttribute("href")
                             break
                         }
                     }

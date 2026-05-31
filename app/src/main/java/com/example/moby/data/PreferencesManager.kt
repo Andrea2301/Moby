@@ -38,7 +38,7 @@ class PreferencesManager(private val context: Context) {
     // --- READER SETTINGS FLOWS ---
     val readerThemeFlow: Flow<String> = context.dataStore.data.map { it[READER_THEME_KEY] ?: "ARRECIFE" }
     val fontSizeFlow: Flow<Float> = context.dataStore.data.map { it[FONT_SIZE_KEY] ?: 100f }
-    val fontFamilyFlow: Flow<String> = context.dataStore.data.map { it[FONT_FAMILY_KEY] ?: "Serif" }
+    val fontFamilyFlow: Flow<String> = context.dataStore.data.map { it[FONT_FAMILY_KEY] ?: "Original" }
     val lineSpacingFlow: Flow<Float> = context.dataStore.data.map { it[LINE_SPACING_KEY] ?: 1.6f }
     val brightnessFlow: Flow<Float> = context.dataStore.data.map { it[BRIGHTNESS_KEY] ?: 1.0f }
 

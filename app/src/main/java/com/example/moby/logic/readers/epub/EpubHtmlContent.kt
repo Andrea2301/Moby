@@ -9,25 +9,43 @@ object EpubHtmlContent {
             ReaderTheme.ARRECIFE -> "#F8F9FA"
             ReaderTheme.ABISAL -> "#0F172A"
             ReaderTheme.ONYX -> "#000000"
-            ReaderTheme.CRETA -> "#F2F2F2"
-            ReaderTheme.PAPIRUS -> "#EFDEC1"
+            ReaderTheme.CRETA -> "#F4ECD8"
+            ReaderTheme.PAPIRUS -> "#D2D2D2"
         }
         val textColor = when (theme) {
             ReaderTheme.ARRECIFE -> "#1E293B"
             ReaderTheme.ABISAL -> "#E2E8F0"
             ReaderTheme.ONYX -> "#FFFFFF"
-            ReaderTheme.CRETA -> "#333333"
-            ReaderTheme.PAPIRUS -> "#4E342E"
+            ReaderTheme.CRETA -> "#423425"
+            ReaderTheme.PAPIRUS -> "#1A1A1A"
         }
 
         val topMargin = "calc(110px + env(safe-area-inset-top))"
         val bottomMargin = "80px"
 
+        val fontFamilyValue = when (fontFamily) {
+            "Original" -> "inherit"
+            "Lora" -> "'Lora', serif"
+            "Merriweather" -> "'Merriweather', serif"
+            "Inter" -> "'Inter', sans-serif"
+            "Serif" -> "serif"
+            "Sans" -> "sans-serif"
+            "Mono" -> "monospace"
+            else -> "inherit"
+        }
+
+        val fontFamilyCssRule = if (fontFamily == "Original") "" else "font-family: $fontFamilyValue !important;"
+        val forceCustomFontRule = if (fontFamily == "Original") "" else """
+            body, p, span, a, div, li, h1, h2, h3, h4, h5, h6 {
+                font-family: $fontFamilyValue !important;
+            }
+        """
+
         return """
             body {
                 background-color: $backgroundColor;
                 color: $textColor;
-                font-family: $fontFamily, sans-serif;
+                $fontFamilyCssRule
                 font-size: ${fontSize}%;
                 line-height: $lineSpacing;
                 margin: 0;
@@ -38,6 +56,12 @@ object EpubHtmlContent {
                 -webkit-user-select: text;
                 user-select: text;
                 -webkit-tap-highlight-color: transparent;
+            }
+
+            $forceCustomFontRule
+
+            ::-webkit-scrollbar {
+                display: none;
             }
 
             #moby-columns {
@@ -142,17 +166,78 @@ object EpubHtmlContent {
                 } catch(e) {}
             };
 
+            function mobyGetTextNodesInRange(range) {
+                var textNodes = [];
+                var ancestor = range.commonAncestorContainer;
+                if (ancestor.nodeType === 3) {
+                    return [ancestor];
+                }
+                var treeWalker = document.createTreeWalker(
+                    ancestor,
+                    NodeFilter.SHOW_TEXT,
+                    {
+                        acceptNode: function(node) {
+                            return range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                        }
+                    },
+                    false
+                );
+                while (treeWalker.nextNode()) {
+                    textNodes.push(treeWalker.currentNode);
+                }
+                return textNodes;
+            }
+
+            function mobyHighlightRange(range, color) {
+                var startContainer = range.startContainer;
+                var startOffset = range.startOffset;
+                var endContainer = range.endContainer;
+                var endOffset = range.endOffset;
+                
+                var textNodes = mobyGetTextNodesInRange(range);
+                
+                textNodes.forEach(function(node) {
+                    var nodeStart = 0;
+                    var nodeEnd = node.nodeValue.length;
+                    
+                    if (node === startContainer) {
+                        nodeStart = startOffset;
+                    }
+                    if (node === endContainer) {
+                        nodeEnd = endOffset;
+                    }
+                    
+                    var highlightTextNode = node;
+                    if (node === startContainer && startOffset > 0) {
+                        highlightTextNode = node.splitText(startOffset);
+                        if (endContainer === startContainer) {
+                            endContainer = highlightTextNode;
+                            endOffset = endOffset - startOffset;
+                        }
+                        nodeEnd = nodeEnd - startOffset;
+                    }
+                    
+                    if (highlightTextNode.nodeValue.length > nodeEnd) {
+                        highlightTextNode.splitText(nodeEnd);
+                    }
+                    
+                    var mark = document.createElement('mark');
+                    mark.className = 'moby-highlight';
+                    if (color) {
+                        mark.style.backgroundColor = color + '66';
+                        mark.style.borderBottom = '2px solid ' + color;
+                    }
+                    
+                    highlightTextNode.parentNode.insertBefore(mark, highlightTextNode);
+                    mark.appendChild(highlightTextNode);
+                });
+            }
+
             window.mobyApplyHighlight = function(cfi, color) {
                 try {
                     var range = mobyDeserializeRange(cfi);
                     if (range) {
-                        var mark = document.createElement('mark');
-                        mark.className = 'moby-highlight';
-                        if (color) {
-                            mark.style.backgroundColor = color + '66';
-                            mark.style.borderBottom = '2px solid ' + color;
-                        }
-                        range.surroundContents(mark);
+                        mobyHighlightRange(range, color);
                     }
                 } catch(e) {}
             };
@@ -306,6 +391,63 @@ object EpubHtmlContent {
                 });
             })();
             
+            window.mobyHighlightAndGoTo = function(query) {
+                if (!query) return;
+                var prevs = document.querySelectorAll('.moby-search-highlight');
+                prevs.forEach(function(el) {
+                    var parent = el.parentNode;
+                    parent.replaceChild(document.createTextNode(el.textContent), el);
+                    parent.normalize();
+                });
+
+                var contentEl = document.getElementById('moby-content');
+                if (!contentEl) return;
+
+                function highlightTextNodes(node, regex) {
+                    if (node.nodeType === 3) {
+                        var match = node.data.match(regex);
+                        if (match) {
+                            var span = document.createElement('span');
+                            span.className = 'moby-search-highlight';
+                            span.style.backgroundColor = '#FF9800';
+                            span.style.color = '#FFFFFF';
+                            span.style.fontWeight = 'bold';
+                            span.style.padding = '2px 4px';
+                            span.style.borderRadius = '4px';
+                            span.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+                            
+                            var middle = node.splitText(match.index);
+                            middle.splitText(query.length);
+                            span.appendChild(middle.cloneNode(true));
+                            middle.parentNode.replaceChild(span, middle);
+                            return 1;
+                        }
+                    } else if (node.nodeType === 1 && node.childNodes && !/(style|script)/i.test(node.tagName) && node.className !== 'moby-search-highlight') {
+                        for (var i = 0; i < node.childNodes.length; i++) {
+                            i += highlightTextNodes(node.childNodes[i], regex);
+                        }
+                    }
+                    return 0;
+                }
+
+                var regex = new RegExp(query.replace(/[-\/\\^${'$'}{}()*+?.()|[\]]/g, '\\$&'), 'i');
+                highlightTextNodes(contentEl, regex);
+
+                var firstHighlight = document.querySelector('.moby-search-highlight');
+                if (firstHighlight) {
+                    var elLeft = firstHighlight.offsetLeft;
+                    var w = window.innerWidth;
+                    if (w > 0) {
+                        var targetPage = Math.floor(elLeft / w);
+                        __mobyTarget = targetPage;
+                        mobySync();
+                        if (window.mobyBridge) {
+                            window.mobyBridge.onVirtualPageIndexChanged(targetPage.toString());
+                        }
+                    }
+                }
+            };
+
             window.onload = function() { 
                 mobyInit(__mobyTarget); 
                 setTimeout(mobySync, 200); 
@@ -317,6 +459,6 @@ object EpubHtmlContent {
     fun build(bodyContent: String, theme: ReaderTheme, fontSize: Float, fontFamily: String, lineSpacing: Float, isVerticalMode: Boolean, virtualPageIndex: Int): String {
         val css = getCss(theme, fontSize, fontFamily, lineSpacing, isVerticalMode)
         val js  = getJs(virtualPageIndex, isVerticalMode)
-        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><style>$css</style><script>$js</script></head><body><div id="moby-bookmark-ribbon" onclick="window.mobyRequestToggleBookmark()"></div><div id="moby-columns"><div id="moby-content">$bodyContent</div></div></body></html>""".trimIndent()
+        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Lora:ital,wght@0,400;0,700;1,400;1,700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400;1,700&display=swap" rel="stylesheet"><style>$css</style><script>$js</script></head><body><div id="moby-bookmark-ribbon" onclick="window.mobyRequestToggleBookmark()"></div><div id="moby-columns"><div id="moby-content">$bodyContent</div></div></body></html>""".trimIndent()
     }
 }

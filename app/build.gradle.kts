@@ -64,6 +64,7 @@ dependencies {
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.androidx.ui.graphics)
+    implementation(libs.androidx.compose.foundation)
     ksp(libs.androidx.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

@@ -40,6 +40,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.moby.data.db.PublicationDao
@@ -47,6 +49,9 @@ import com.example.moby.logic.BookMetadataExtractor
 import com.example.moby.models.Publication
 import com.example.moby.ui.components.PublicationCard
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.documentfile.provider.DocumentFile
 import java.io.File
 
 enum class SortBy {
@@ -232,6 +237,47 @@ fun LibraryScreen(
     val coverSearchService = remember { com.example.moby.logic.CoverSearchService(context) }
     var showWebCoverSearch by remember { mutableStateOf(false) }
 
+    var showImportSheet by remember { mutableStateOf(false) }
+    var pendingFormats by remember { mutableStateOf(setOf<String>()) }
+    var pendingMinSize by remember { mutableLongStateOf(0L) }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let { treeUri ->
+            scope.launch {
+                snackbarHostState.showSnackbar("Escaneando carpeta...")
+                
+                val importedCount = withContext(Dispatchers.IO) {
+                    var count = 0
+                    val pickedDir = DocumentFile.fromTreeUri(context, treeUri)
+                    pickedDir?.listFiles()?.forEach { file ->
+                        if (file.isFile) {
+                            val name = file.name ?: ""
+                            val ext = name.substringAfterLast(".", "").uppercase()
+                            val size = file.length()
+                            
+                            if (ext in pendingFormats && size >= pendingMinSize * 1024) {
+                                // DETECCIÓN DE DUPLICADOS
+                                val existing = publicationDao.getPublicationById(name)
+                                if (existing == null) {
+                                    val newPublication = metadataExtractor.extract(file.uri, name)
+                                    if (newPublication != null) {
+                                        publicationDao.insertPublication(newPublication)
+                                        count++
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    count
+                }
+                
+                snackbarHostState.showSnackbar("Escaneo finalizado: $importedCount nuevos libros añadidos")
+            }
+        }
+    }
+
     val coverPickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             uri?.let { sourceUri ->
@@ -326,7 +372,19 @@ fun LibraryScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         containerColor = androidx.compose.ui.graphics.Color.Transparent
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+        val bgStart = if (isDark) MaterialTheme.colorScheme.background else Color(0xFFF8F9FA)
+        val bgEnd = if (isDark) MaterialTheme.colorScheme.surface else Color(0xFFECF0F3)
+        
+        val dynamicGradient = Brush.verticalGradient(
+            colors = listOf(
+                bgStart,
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.05f), // Sutil brillo cian
+                bgEnd
+            )
+        )
+
+        Box(modifier = Modifier.fillMaxSize().background(dynamicGradient).padding(padding)) {
             if (publications.isEmpty()) {
                 PlaceholderScreen(
                     title = "Biblioteca Vacía",
@@ -495,15 +553,18 @@ fun LibraryScreen(
                     }
                 }
 
-                var fabExpanded by remember { mutableStateOf(false) }
+            } // Cierra el else de publications.isEmpty()
+            
+            var fabExpanded by remember { mutableStateOf(false) }
 
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.End
-                ) {
-                    if (fabExpanded) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.End
+            ) {
+                if (fabExpanded) {
+                    if (publications.isNotEmpty()) {
                         ExtendedFloatingActionButton(
                             text = { Text("Limpiar Biblioteca") },
                             icon = { Icon(Icons.Filled.Delete, contentDescription = "Clean") },
@@ -515,38 +576,30 @@ fun LibraryScreen(
                             containerColor = MaterialTheme.colorScheme.errorContainer,
                             contentColor = MaterialTheme.colorScheme.onErrorContainer
                         )
-
-                        ExtendedFloatingActionButton(
-                            text = { Text("Importar Libro") },
-                            icon = { Icon(Icons.Filled.Add, contentDescription = "Import") },
-                            onClick = {
-                                launcher.launch(
-                                    arrayOf(
-                                        "application/pdf",
-                                        "application/epub+zip",
-                                        "application/x-cbz",
-                                        "application/zip",
-                                        "application/octet-stream"
-                                    )
-                                )
-                                fabExpanded = false
-                            },
-                            modifier = Modifier.padding(bottom = 16.dp),
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
                     }
 
-                    FloatingActionButton(
-                        onClick = { fabExpanded = !fabExpanded },
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ) {
-                        Icon(
-                            if (fabExpanded) Icons.Filled.Close else Icons.Filled.Add,
-                            contentDescription = "Opciones"
-                        )
-                    }
+                    ExtendedFloatingActionButton(
+                        text = { Text("Importar Libro") },
+                        icon = { Icon(Icons.Filled.Add, contentDescription = "Import") },
+                        onClick = {
+                            showImportSheet = true
+                            fabExpanded = false
+                        },
+                        modifier = Modifier.padding(bottom = 16.dp),
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+
+                FloatingActionButton(
+                    onClick = { fabExpanded = !fabExpanded },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ) {
+                    Icon(
+                        if (fabExpanded) Icons.Filled.Close else Icons.Filled.Add,
+                        contentDescription = "Opciones"
+                    )
                 }
             }
         }
@@ -577,6 +630,38 @@ fun LibraryScreen(
                 onDismiss = {
                     showContextMenu = false
                     publicationToEdit = null
+                }
+            )
+        }
+
+        if (showImportSheet) {
+            com.example.moby.ui.components.SmartImportSheet(
+                onDismiss = { showImportSheet = false },
+                onScanFolderClick = { formats, minSize ->
+                    pendingFormats = formats
+                    pendingMinSize = minSize
+                    folderPickerLauncher.launch(null)
+                    showImportSheet = false
+                },
+                onSelectFilesClick = { formats ->
+                    val mimeTypes = mutableListOf<String>()
+                    if (formats.contains("EPUB")) mimeTypes.add("application/epub+zip")
+                    if (formats.contains("PDF")) mimeTypes.add("application/pdf")
+                    if (formats.contains("MOBI")) mimeTypes.add("application/octet-stream")
+                    if (formats.contains("CBZ")) mimeTypes.add("application/x-cbz")
+                    if (formats.contains("TXT")) mimeTypes.add("text/plain")
+                    
+                    if (mimeTypes.isEmpty()) {
+                        mimeTypes.addAll(listOf(
+                            "application/pdf",
+                            "application/epub+zip",
+                            "application/x-cbz",
+                            "application/octet-stream"
+                        ))
+                    }
+                    
+                    launcher.launch(mimeTypes.toTypedArray())
+                    showImportSheet = false
                 }
             )
         }

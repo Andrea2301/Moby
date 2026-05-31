@@ -119,13 +119,13 @@ fun HomeScreen(
     )
 
     // Gradiente base según tema
-    val bgStart = if (isAbisal) Color(0xFF011627) else Color(0xFFF8F9FA)
-    val bgEnd = if (isAbisal) Color(0xFF0D1B2A) else Color(0xFFECF0F3)
+    val bgStart = if (isAbisal) MaterialTheme.colorScheme.background else Color(0xFFF8F9FA)
+    val bgEnd = if (isAbisal) MaterialTheme.colorScheme.surface else Color(0xFFECF0F3)
 
     val dynamicGradient = Brush.verticalGradient(
         colors = listOf(
             bgStart,
-            animatedAccentColor.copy(alpha = 0.15f),
+            animatedAccentColor.copy(alpha = 0.1f), // Más sutil para que sea sobrio
             bgEnd
         )
     )

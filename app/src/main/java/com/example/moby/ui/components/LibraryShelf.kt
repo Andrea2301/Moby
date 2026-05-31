@@ -33,7 +33,7 @@ fun LibraryShelf(
     
     // Paleta Adaptativa Refinada
     val shelfSlabColor = if (isDark) Color(0xFF2C2C2C) else Color.White
-    val nicheBgColor = if (isDark) Color(0xFF1A1A1A) else Color(0xFFF2F2F2)
+    val nicheBgColor = if (isDark) Color(0xFF1A1A1A).copy(alpha = 0.85f) else Color(0xFFF2F2F2)
     val shelfFrontTop = if (isDark) Color(0xFF383838) else Color(0xFFF8F8F8)
     val shelfFrontBottom = if (isDark) Color(0xFF151515) else Color(0xFFD0D0D0)
     val edgeHighlight = if (isDark) Color.White.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.8f)
