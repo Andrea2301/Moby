@@ -72,7 +72,10 @@ object EpubHtmlContent {
                 column-width: 100vw;
                 column-gap: 0;
                 column-fill: auto;
-                transition: transform 0.3s ease-out;
+            }
+
+            .moby-animated {
+                transition: transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             }
 
             #moby-content {
@@ -104,7 +107,6 @@ object EpubHtmlContent {
                 clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 50% 85%, 0% 100%);
                 z-index: 2000;
                 transform: translateY(-100%);
-                transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
                 box-shadow: 0 2px 6px rgba(0,0,0,0.3);
             }
 
@@ -146,7 +148,7 @@ object EpubHtmlContent {
                     }
                     el.style.transform = 'translateX(-' + (__mobyTarget * __mobyW) + 'px)';
                 }
-                mobyCheckBookmarks();
+                if (__mobyBookmarks.length > 0) mobyCheckBookmarks();
             }
 
             // MOTOR DE OFFSETS (KINDLE STYLE)
@@ -277,7 +279,8 @@ object EpubHtmlContent {
                 if (__mobyNavLock) return;
                 __mobyNavLock = true;
                 setTimeout(function(){ __mobyNavLock = false; }, 300);
-                mobyMeasure();
+                var el = document.getElementById('moby-columns');
+                if (el) el.classList.add('moby-animated');
                 if (__mobyTarget < __mobyCount - 1) {
                     __mobyTarget++; mobySync();
                     if (window.mobyBridge) window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget.toString());
@@ -288,6 +291,8 @@ object EpubHtmlContent {
                 if (__mobyNavLock) return;
                 __mobyNavLock = true;
                 setTimeout(function(){ __mobyNavLock = false; }, 300);
+                var el = document.getElementById('moby-columns');
+                if (el) el.classList.add('moby-animated');
                 if (__mobyTarget > 0) {
                     __mobyTarget--; mobySync();
                     if (window.mobyBridge) window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget.toString());
@@ -295,11 +300,10 @@ object EpubHtmlContent {
             }
 
             function mobyInit(targetPage) {
-                __mobyTarget = targetPage;
                 var el = document.getElementById('moby-columns');
-                if (el) el.style.transition = 'none';
+                if (el) el.classList.remove('moby-animated');
+                __mobyTarget = targetPage;
                 mobySync();
-                setTimeout(function() { if (el) el.style.transition = 'transform 0.3s ease-out'; }, 50);
             }
 
             function mobySerializeRange(range) {
@@ -448,10 +452,25 @@ object EpubHtmlContent {
                 }
             };
 
-            window.onload = function() { 
-                mobyInit(__mobyTarget); 
-                setTimeout(mobySync, 200); 
-                setInterval(mobySync, 3000);
+            window.onload = function() {
+                mobyInit(__mobyTarget);
+                setTimeout(mobySync, 100);
+                if (document.fonts && document.fonts.ready) {
+                    document.fonts.ready.then(function() {
+                        mobySync();
+                    });
+                }
+                if (window.ResizeObserver) {
+                    var ro = new ResizeObserver(function(entries) {
+                        for (var i = 0; i < entries.length; i++) {
+                            if (entries[i].contentRect.width > 0) {
+                                mobySync();
+                            }
+                        }
+                    });
+                    ro.observe(document.documentElement);
+                }
+                setInterval(mobySync, 10000);
             };
         """.trimIndent()
     }
@@ -459,6 +478,6 @@ object EpubHtmlContent {
     fun build(bodyContent: String, theme: ReaderTheme, fontSize: Float, fontFamily: String, lineSpacing: Float, isVerticalMode: Boolean, virtualPageIndex: Int): String {
         val css = getCss(theme, fontSize, fontFamily, lineSpacing, isVerticalMode)
         val js  = getJs(virtualPageIndex, isVerticalMode)
-        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Lora:ital,wght@0,400;0,700;1,400;1,700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400;1,700&display=swap" rel="stylesheet"><style>$css</style><script>$js</script></head><body><div id="moby-bookmark-ribbon" onclick="window.mobyRequestToggleBookmark()"></div><div id="moby-columns"><div id="moby-content">$bodyContent</div></div></body></html>""".trimIndent()
+        return """<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"><style>$css</style><script>$js</script></head><body><div id="moby-bookmark-ribbon" onclick="window.mobyRequestToggleBookmark()"></div><div id="moby-columns"><div id="moby-content">$bodyContent</div></div></body></html>""".trimIndent()
     }
 }

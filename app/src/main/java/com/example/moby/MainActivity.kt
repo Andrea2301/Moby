@@ -18,13 +18,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.EaseInOutQuad
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.example.moby.data.db.MobyDatabase
 import com.example.moby.logic.BookMetadataExtractor
@@ -130,34 +126,12 @@ class MainActivity : ComponentActivity() {
                         }
 
                         Box(modifier = modifier) {
+                            // Non-reader screens managed by AnimatedContent
                             AnimatedContent(
-                                targetState = currentScreen,
-                                transitionSpec = {
-                                    val initialOrder = when (initialState) {
-                                        MobyScreen.Home -> 0
-                                        MobyScreen.Library -> 1
-                                        MobyScreen.Bookmarks -> 2
-                                        MobyScreen.Journal -> 3
-                                        is MobyScreen.Reader -> 4
-                                    }
-                                    val targetOrder = when (targetState) {
-                                        MobyScreen.Home -> 0
-                                        MobyScreen.Library -> 1
-                                        MobyScreen.Bookmarks -> 2
-                                        MobyScreen.Journal -> 3
-                                        is MobyScreen.Reader -> 4
-                                    }
-                                    
-                                    if (targetState is MobyScreen.Reader || initialState is MobyScreen.Reader) {
-                                        fadeIn(animationSpec = tween(400)) togetherWith fadeOut(animationSpec = tween(400))
-                                    } else if (targetOrder > initialOrder) {
-                                        (slideInHorizontally(animationSpec = tween(400, easing = EaseInOutQuad)) { it } + fadeIn(animationSpec = tween(400)))
-                                            .togetherWith(slideOutHorizontally(animationSpec = tween(400, easing = EaseInOutQuad)) { -it } + fadeOut(animationSpec = tween(400)))
-                                    } else {
-                                        (slideInHorizontally(animationSpec = tween(400, easing = EaseInOutQuad)) { -it } + fadeIn(animationSpec = tween(400)))
-                                            .togetherWith(slideOutHorizontally(animationSpec = tween(400, easing = EaseInOutQuad)) { it } + fadeOut(animationSpec = tween(400)))
-                                    }
-                                },
+                                targetState = if (currentScreen is MobyScreen.Reader) MobyScreen.Library else currentScreen,
+                                    transitionSpec = {
+                                        EnterTransition.None togetherWith ExitTransition.None
+                                    },
                                 label = "ScreenNavigation"
                             ) { screen ->
                                 when (screen) {
@@ -176,13 +150,18 @@ class MainActivity : ComponentActivity() {
                                     )
                                     MobyScreen.Bookmarks -> BookmarksScreen()
                                     MobyScreen.Journal -> JournalScreen()
-                                    is MobyScreen.Reader -> ReaderScreen(
-                                        publicationId = screen.publicationId,
-                                        onBack = { currentScreen = MobyScreen.Library },
-                                        isAbisal = isAbisal,
-                                        preferencesManager = preferencesManager
-                                    )
+                                    is MobyScreen.Reader -> {} // Never reached
                                 }
+                            }
+
+                            // Reader lives OUTSIDE AnimatedContent to avoid WebView destruction flash
+                            if (currentScreen is MobyScreen.Reader) {
+                                ReaderScreen(
+                                    publicationId = (currentScreen as MobyScreen.Reader).publicationId,
+                                    onBack = { currentScreen = MobyScreen.Library },
+                                    isAbisal = isAbisal,
+                                    preferencesManager = preferencesManager
+                                )
                             }
                         }
                     }

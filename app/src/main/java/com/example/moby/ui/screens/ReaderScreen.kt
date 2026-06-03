@@ -37,6 +37,7 @@ import com.example.moby.models.PublicationFormat
 import com.example.moby.logic.readers.PdfReaderComponent
 import com.example.moby.logic.readers.CbzReaderComponent
 import com.example.moby.logic.readers.EpubReaderComponent
+import com.example.moby.logic.tts.TtsManager
 import com.example.moby.data.PreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -92,6 +93,20 @@ fun ReaderScreen(
     var isRtlEnabled: Boolean by remember { mutableStateOf(false) }
     var isWebtoonMode: Boolean by remember { mutableStateOf(false) }
     
+    var showTtsControls by remember { mutableStateOf(false) }
+    val savedTtsSpeed: Float by preferencesManager.ttsSpeedFlow.collectAsState(initial = 1.0f)
+    val ttsManager = remember { TtsManager(context) }
+    val isTtsPlaying by ttsManager.isPlaying.collectAsState()
+    val isTtsPaused by ttsManager.isPaused.collectAsState()
+
+    DisposableEffect(Unit) {
+        onDispose { ttsManager.shutdown() }
+    }
+    
+    LaunchedEffect(savedTtsSpeed) {
+        ttsManager.setSpeed(savedTtsSpeed)
+    }
+
     var bookmarkAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // Sync local state when DataStore loads (first time or from other places)
@@ -215,9 +230,12 @@ fun ReaderScreen(
                             if (!showControls) {
                                 showSettings = false
                                 showChapterList = false
+                                showTtsControls = false
                             }
                         },
-                        onToggleBookmarkRequested = { action -> bookmarkAction = action }
+                        onToggleBookmarkRequested = { action -> bookmarkAction = action },
+                        ttsManager = ttsManager,
+                        isTtsActive = showTtsControls
                     )
                 }
                 PublicationFormat.CBZ -> {
@@ -262,8 +280,8 @@ fun ReaderScreen(
         AnimatedVisibility(
             visible = showChapterList,
             modifier = Modifier.align(Alignment.CenterEnd),
-            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut()
+            enter = EnterTransition.None,
+            exit = ExitTransition.None
         ) {
             Surface(
                 modifier = Modifier.fillMaxHeight().fillMaxWidth(0.7f),
@@ -503,8 +521,8 @@ fun ReaderScreen(
         // TOP BAR (Controls)
         AnimatedVisibility(
             visible = showControls,
-            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
+            enter = EnterTransition.None,
+            exit = ExitTransition.None
         ) {
             Surface(color = Color.Black.copy(alpha = 0.8f), contentColor = Color.White) {
                 Row(
@@ -530,8 +548,8 @@ fun ReaderScreen(
         AnimatedVisibility(
             visible = showControls && !showSettings && !showChapterList,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            enter = EnterTransition.None,
+            exit = ExitTransition.None
         ) {
             Surface(
                 color = Color.Black.copy(alpha = 0.8f),
@@ -604,8 +622,8 @@ fun ReaderScreen(
         AnimatedVisibility(
             visible = showSettings,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            enter = EnterTransition.None,
+            exit = ExitTransition.None
         ) {
             ReaderSettingsBottomPanel(
                 theme = readerTheme,
@@ -672,6 +690,38 @@ fun ReaderScreen(
                 onSearchClick = {
                     showSearchDialog = true
                     showSettings = false
+                },
+                onTtsClick = {
+                    showTtsControls = true
+                    showSettings = false
+                }
+            )
+        }
+
+        // TTS CONTROL PANEL
+        AnimatedVisibility(
+            visible = showTtsControls,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = EnterTransition.None,
+            exit = ExitTransition.None
+        ) {
+            TtsControlPanel(
+                isPlaying = isTtsPlaying,
+                isPaused = isTtsPaused,
+                speed = savedTtsSpeed,
+                onSpeedChange = { 
+                    scope.launch { preferencesManager.setReaderSettings(ttsSpeed = it) }
+                },
+                onPlayPauseClick = {
+                    if (isTtsPlaying && !isTtsPaused) {
+                        ttsManager.pause()
+                    } else if (isTtsPaused) {
+                        ttsManager.resume()
+                    }
+                },
+                onStopClick = {
+                    ttsManager.stop()
+                    showTtsControls = false
                 }
             )
         }
@@ -712,7 +762,8 @@ fun ReaderSettingsBottomPanel(
     isWebtoonMode: Boolean = false,
     onWebtoonChange: (Boolean) -> Unit = {},
     isPdf: Boolean = false,
-    onSearchClick: () -> Unit = {}
+    onSearchClick: () -> Unit = {},
+    onTtsClick: () -> Unit = {}
 ) {
     var currentView by remember { mutableStateOf("main") }
     val panelBg = MaterialTheme.colorScheme.surface
@@ -729,11 +780,7 @@ fun ReaderSettingsBottomPanel(
         AnimatedContent(
             targetState = currentView,
             transitionSpec = {
-                if (targetState == "advanced") {
-                    slideInHorizontally { it } + fadeIn() togetherWith slideOutHorizontally { -it } + fadeOut()
-                } else {
-                    slideInHorizontally { -it } + fadeIn() togetherWith slideOutHorizontally { it } + fadeOut()
-                }
+                EnterTransition.None togetherWith ExitTransition.None
             },
             label = "SettingsTransition"
         ) { view ->
@@ -754,7 +801,10 @@ fun ReaderSettingsBottomPanel(
                         onWebtoonChange = onWebtoonChange,
                         isPdf = isPdf,
                         onNavigateToAdvanced = { currentView = "advanced" },
-                        onSearchClick = onSearchClick
+                        onSearchClick = onSearchClick,
+                        onTtsClick = {
+                            onTtsClick()
+                        }
                     )
                     "advanced" -> AdvancedSettingsView(
                         fontFamily = fontFamily,
@@ -790,7 +840,8 @@ fun MainSettingsView(
     onWebtoonChange: (Boolean) -> Unit,
     isPdf: Boolean,
     onNavigateToAdvanced: () -> Unit,
-    onSearchClick: () -> Unit = {}
+    onSearchClick: () -> Unit = {},
+    onTtsClick: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -823,7 +874,7 @@ fun MainSettingsView(
                 VerticalDivider(modifier = Modifier.height(30.dp).padding(horizontal = 8.dp), color = Color.Gray.copy(alpha = 0.2f))
                 
                 // Voice Placeholder
-                IconButton(onClick = {}) {
+                IconButton(onClick = onTtsClick) {
                     Icon(Icons.Default.GraphicEq, "Voice", tint = MaterialTheme.colorScheme.primary)
                 }
             }
@@ -1392,6 +1443,73 @@ fun SearchInBookDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun TtsControlPanel(
+    isPlaying: Boolean,
+    isPaused: Boolean,
+    speed: Float,
+    onSpeedChange: (Float) -> Unit,
+    onPlayPauseClick: () -> Unit,
+    onStopClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        tonalElevation = 12.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Box(modifier = Modifier.size(40.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(Color.Gray.copy(alpha = 0.3f)))
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text("Lector de Voz", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onStopClick,
+                    modifier = Modifier.size(56.dp).clip(CircleShape).background(MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Icon(Icons.Default.Stop, "Stop", tint = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.size(32.dp))
+                }
+                
+                IconButton(
+                    onClick = onPlayPauseClick,
+                    modifier = Modifier.size(72.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer)
+                ) {
+                    Icon(
+                        if (isPlaying && !isPaused) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        "Play/Pause",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Text("Velocidad: ${String.format("%.1fx", speed)}", style = MaterialTheme.typography.labelMedium)
+            Slider(
+                value = speed,
+                onValueChange = onSpeedChange,
+                valueRange = 0.5f..2.5f,
+                steps = 19,
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }

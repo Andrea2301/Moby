@@ -59,7 +59,9 @@ fun EpubReaderComponent(
     theme: ReaderTheme,
     onCenterTap: () -> Unit,
     onToggleBookmarkRequested: ((() -> Unit) -> Unit)? = null,
-    activeSearchQuery: String? = null
+    activeSearchQuery: String? = null,
+    ttsManager: com.example.moby.logic.tts.TtsManager? = null,
+    isTtsActive: Boolean = false
 ) {
     var chapters by remember { mutableStateOf<List<String>>(emptyList()) }
     var opfDir by remember { mutableStateOf("") }
@@ -84,17 +86,50 @@ fun EpubReaderComponent(
                 val spineX = """<spine[^>]*>(.*?)</spine>""".toRegex(RegexOption.DOT_MATCHES_ALL).find(opfX)?.groupValues?.get(1)!!
                 val chapterHs = """<itemref[^>]+idref="([^"]+)"""".toRegex()
                     .findAll(spineX).mapNotNull { manifestMap[it.groupValues[1]] }.toList()
+
+                // Filter out blank/separator chapters (common in many EPUBs)
+                val filteredChapters = chapterHs.filter { href ->
+                    try {
+                        val decoded = android.net.Uri.decode(href)
+                        val entryPath = if (opfDir.isNotEmpty()) opfDir + decoded else decoded
+                        val entry = zip.getEntry(entryPath) ?: zip.getEntry(decoded)
+                        if (entry != null && entry.size < 3000) {
+                            // Small file — check if it has real content
+                            val content = zip.getInputStream(entry).bufferedReader().readText()
+                            val bodyStart = content.indexOf("<body", ignoreCase = true)
+                            val bodyEnd = content.lastIndexOf("</body>", ignoreCase = true)
+                            val body = if (bodyStart != -1 && bodyEnd != -1) {
+                                content.substring(content.indexOf(">", bodyStart) + 1, bodyEnd)
+                            } else content
+                            val hasImage = body.contains("<img", ignoreCase = true) ||
+                                           body.contains("<image", ignoreCase = true) ||
+                                           body.contains("<svg", ignoreCase = true)
+                            val visibleText = body.replace(Regex("<[^>]+>"), "")
+                                                  .replace(Regex("&[a-zA-Z0-9#]+;"), " ")
+                                                  .trim()
+                            hasImage || visibleText.length > 30
+                        } else true // Large files always have real content
+                    } catch (e: Exception) {
+                        true // On error, keep the chapter
+                    }
+                }
+
                 zip.close()
                 withContext(Dispatchers.Main) { 
-                    chapters = chapterHs
-                    onTotalChaptersReady(chapterHs.size)
-                    onChaptersLoaded(chapterHs)
+                    chapters = filteredChapters
+                    onTotalChaptersReady(filteredChapters.size)
+                    onChaptersLoaded(filteredChapters)
                 }
             } catch (e: Exception) { withContext(Dispatchers.Main) { fileLoadError = true } }
         }
     }
 
-    DisposableEffect(Unit) { onDispose { EpubZipEngine.close() } }
+    val disposeScope = rememberCoroutineScope()
+    DisposableEffect(Unit) {
+        onDispose {
+            disposeScope.launch(Dispatchers.IO) { EpubZipEngine.close() }
+        }
+    }
 
     if (fileLoadError || chapters.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -113,7 +148,6 @@ fun EpubReaderComponent(
     var isNavigating by remember { mutableStateOf(false) }
 
     LaunchedEffect(pagerState.currentPage, virtualPageIndex, totalBookPages) {
-        delay(300)
         if (virtualPageIndex >= 0) {
             val globalPage = (0 until pagerState.currentPage).sumOf { chapterPageCounts[it] ?: 0 } + (virtualPageIndex + 1)
             onVirtualPageChanged(globalPage, totalBookPages)
@@ -148,6 +182,48 @@ fun EpubReaderComponent(
             }
         }
         previousChapter = pagerState.currentPage
+    }
+
+    LaunchedEffect(isTtsActive, pagerState.currentPage) {
+        if (isTtsActive && ttsManager != null && chapters.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val decoded = android.net.Uri.decode(chapters[pagerState.currentPage])
+                    val entryPath = if (opfDir.isNotEmpty()) opfDir + decoded else decoded
+                    val entryContent = EpubZipEngine.readEntry(filePath, entryPath)?.let { String(it) } ?: ""
+                    val bodyStart = entryContent.indexOf("<body", ignoreCase = true)
+                    val bodyEnd = entryContent.lastIndexOf("</body>", ignoreCase = true)
+                    val body = if (bodyStart != -1 && bodyEnd != -1) {
+                        entryContent.substring(entryContent.indexOf(">", bodyStart) + 1, bodyEnd)
+                    } else entryContent
+                    // Strip HTML tags and replace common entities
+                    val visibleText = body.replace(Regex("<[^>]+>"), " ")
+                                          .replace("&nbsp;", " ")
+                                          .replace("&amp;", "&")
+                                          .replace("&lt;", "<")
+                                          .replace("&gt;", ">")
+                                          .replace(Regex("&[a-zA-Z0-9#]+;"), " ")
+                                          .trim()
+                    withContext(Dispatchers.Main) {
+                        ttsManager.startReading(visibleText)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(ttsManager) {
+        ttsManager?.onChapterFinished = {
+            if (pagerState.currentPage < chapters.size - 1) {
+                scope.launch {
+                    pagerState.scrollToPage(pagerState.currentPage + 1)
+                }
+            } else {
+                ttsManager.stop()
+            }
+        }
     }
 
     val bg = theme.toColor()
@@ -190,8 +266,7 @@ fun EpubReaderComponent(
                                 try {
                                     isNavigating = true
                                     virtualPageIndex = 0
-                                    pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                                    delay(400)
+                                    pagerState.scrollToPage(pagerState.currentPage + 1)
                                 } finally {
                                     isNavigating = false
                                 }
@@ -201,8 +276,7 @@ fun EpubReaderComponent(
                                 try {
                                     isNavigating = true
                                     virtualPageIndex = -1
-                                    pagerState.animateScrollToPage(pagerState.currentPage - 1)
-                                    delay(400)
+                                    pagerState.scrollToPage(pagerState.currentPage - 1)
                                 } finally {
                                     isNavigating = false
                                 }
@@ -274,13 +348,18 @@ fun EpubChapterRender(
         showSelectionPopup = false
         withContext(Dispatchers.IO) {
             try {
-                val zip = ZipFile(File(filePath))
-                val entry = zip.getEntry(internalPath)
-                if (entry != null) {
-                    val raw = zip.getInputStream(entry).bufferedReader().readText()
-                    zip.close()
-                    rawBody = Regex("(?si)<body[^>]*>(.*?)</body>").find(raw)?.groupValues?.get(1) ?: raw
-                } else zip.close()
+                val bytes = EpubZipEngine.readEntry(filePath, internalPath)
+                if (bytes != null) {
+                    val raw = String(bytes, Charsets.UTF_8)
+                    val bodyStart = raw.indexOf("<body")
+                    val bodyEnd = raw.indexOf("</body>")
+                    rawBody = if (bodyStart != -1 && bodyEnd != -1) {
+                        val startOfContent = raw.indexOf(">", bodyStart) + 1
+                        raw.substring(startOfContent, bodyEnd)
+                    } else {
+                        raw
+                    }
+                }
             } catch (e: Exception) { e.printStackTrace() }
         }
     }
@@ -293,10 +372,12 @@ fun EpubChapterRender(
     val chapterDir = internalPath.substringBeforeLast("/", "")
     val baseUrl = if (chapterDir.isNotEmpty()) "moby-epub://book/$chapterDir/" else "moby-epub://book/"
 
-    LaunchedEffect(htmlContent) {
+    LaunchedEffect(htmlContent, webViewRef.value) {
         val view = webViewRef.value ?: return@LaunchedEffect
-        isPageReady = false
-        view.loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
+        if (rawBody != null) {
+            isPageReady = false
+            view.loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
+        }
     }
 
     // Register the toggle action ONLY when this chapter is active
@@ -329,117 +410,113 @@ fun EpubChapterRender(
 
     val bg = theme.toColor()
     Box(modifier = Modifier.fillMaxSize().background(bg), contentAlignment = Alignment.Center) {
-        if (rawBody != null) {
-            val chapterDir = internalPath.substringBeforeLast("/", "")
-            val baseUrl = if (chapterDir.isNotEmpty()) "moby-epub://book/$chapterDir/" else "moby-epub://book/"
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
-                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        isVerticalScrollBarEnabled = false
-                        isHorizontalScrollBarEnabled = false
-                        settings.apply { 
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            allowContentAccess = true
-                            allowFileAccess = false
-                            textZoom = 100
-                            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        }
-                        isHapticFeedbackEnabled = false
-                        
-                        val bridge = EpubJavascriptBridge(
-                            context = context,
-                            scope = scope,
-                            onVirtualPageCountReady = onVirtualPageCountReady,
-                            onVirtualPageIndexChanged = onVirtualPageIndexChanged,
-                            onChapterBoundary = onChapterBoundary,
-                            onTextSelectedRaw = { text, cfi, x, y, w, h ->
-                                selectionText = text
-                                selectionCfi = cfi
-                                selectionX = x
-                                selectionY = y
-                                showSelectionPopup = true
-                            },
-                            onSelectionClearedRaw = {
-                                showSelectionPopup = false
-                            },
-                            onCenterTap = onCenterTap,
-                            onBookmarkToggled = { cfi ->
-                                scope.launch(Dispatchers.IO) {
-                                    // Comprobar si ya existe un marcador cerca de este CFI
-                                    val existing = annotations.find { it.cfiInfo == cfi && it.selectedText.isEmpty() }
-                                    if (existing != null) {
-                                        dao.deleteAnnotationById(existing.id)
-                                        withContext(Dispatchers.Main) { annotations.remove(existing) }
-                                    } else {
-                                        val newBookmark = BookAnnotation(
-                                            publicationId = publicationId,
-                                            chapterPath = internalPath,
-                                            cfiInfo = cfi,
-                                            selectedText = "",
-                                            colorHex = "#FF5252"
-                                        )
-                                        dao.insertAnnotation(newBookmark)
-                                        withContext(Dispatchers.Main) { 
-                                            annotations.add(newBookmark)
-                                            android.widget.Toast.makeText(context, "Marcador guardado", android.widget.Toast.LENGTH_SHORT).show()
-                                        }
+        val chapterDir = internalPath.substringBeforeLast("/", "")
+        val baseUrl = if (chapterDir.isNotEmpty()) "moby-epub://book/$chapterDir/" else "moby-epub://book/"
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    isVerticalScrollBarEnabled = false
+                    isHorizontalScrollBarEnabled = false
+                    settings.apply { 
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        allowContentAccess = true
+                        allowFileAccess = false
+                        textZoom = 100
+                        mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    }
+                    isHapticFeedbackEnabled = false
+                    
+                    val bridge = EpubJavascriptBridge(
+                        context = context,
+                        scope = scope,
+                        onVirtualPageCountReady = onVirtualPageCountReady,
+                        onVirtualPageIndexChanged = onVirtualPageIndexChanged,
+                        onChapterBoundary = onChapterBoundary,
+                        onTextSelectedRaw = { text, cfi, x, y, w, h ->
+                            selectionText = text
+                            selectionCfi = cfi
+                            selectionX = x
+                            selectionY = y
+                            showSelectionPopup = true
+                        },
+                        onSelectionClearedRaw = {
+                            showSelectionPopup = false
+                        },
+                        onCenterTap = onCenterTap,
+                        onBookmarkToggled = { cfi ->
+                            scope.launch(Dispatchers.IO) {
+                                // Comprobar si ya existe un marcador cerca de este CFI
+                                val existing = annotations.find { it.cfiInfo == cfi && it.selectedText.isEmpty() }
+                                if (existing != null) {
+                                    dao.deleteAnnotationById(existing.id)
+                                    withContext(Dispatchers.Main) { annotations.remove(existing) }
+                                } else {
+                                    val newBookmark = BookAnnotation(
+                                        publicationId = publicationId,
+                                        chapterPath = internalPath,
+                                        cfiInfo = cfi,
+                                        selectedText = "",
+                                        colorHex = "#FF5252"
+                                    )
+                                    dao.insertAnnotation(newBookmark)
+                                    withContext(Dispatchers.Main) { 
+                                        annotations.add(newBookmark)
+                                        android.widget.Toast.makeText(context, "Marcador guardado", android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
-                        )
-                        addJavascriptInterface(bridge, "mobyBridge")
-
-                        setOnTouchListener { v, event ->
-                            v.parent.requestDisallowInterceptTouchEvent(true)
-                            false
                         }
+                    )
+                    addJavascriptInterface(bridge, "mobyBridge")
 
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                isPageReady = true
-                            }
-                            override fun shouldInterceptRequest(view: WebView?, request: android.webkit.WebResourceRequest?): android.webkit.WebResourceResponse? {
-                                val uri = request?.url ?: return null
-                                if (uri.scheme != "moby-epub") return null
-                                val rawPath = uri.path ?: return null
-                                val pathNoBook = if (rawPath.startsWith("/book/")) rawPath.substring(6) else rawPath.removePrefix("/")
-                                val decoded = android.net.Uri.decode(pathNoBook)
-                                val bytes = EpubZipEngine.readEntry(filePath, decoded) ?: EpubZipEngine.readEntry(filePath, "${internalPath.substringBeforeLast("/", "")}/$decoded") ?: return null
-                                return android.webkit.WebResourceResponse(EpubZipEngine.getMimeType(decoded), "UTF-8", bytes.inputStream())
-                            }
+                    setOnTouchListener { v, event ->
+                        v.parent.requestDisallowInterceptTouchEvent(true)
+                        false
+                    }
+
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            isPageReady = true
                         }
-                        webViewRef.value = this
+                        override fun shouldInterceptRequest(view: WebView?, request: android.webkit.WebResourceRequest?): android.webkit.WebResourceResponse? {
+                            val uri = request?.url ?: return null
+                            if (uri.scheme != "moby-epub") return null
+                            val rawPath = uri.path ?: return null
+                            val pathNoBook = if (rawPath.startsWith("/book/")) rawPath.substring(6) else rawPath.removePrefix("/")
+                            val decoded = android.net.Uri.decode(pathNoBook)
+                            val bytes = EpubZipEngine.readEntry(filePath, decoded) ?: EpubZipEngine.readEntry(filePath, "${internalPath.substringBeforeLast("/", "")}/$decoded") ?: return null
+                            return android.webkit.WebResourceResponse(EpubZipEngine.getMimeType(decoded), "UTF-8", bytes.inputStream())
+                        }
                     }
-                },
-                update = { view ->
-                    if (view.tag != internalPath) {
-                        view.tag = internalPath
-                        isPageReady = false
-                        val html = EpubHtmlContent.build(rawBody!!, theme, fontSize, fontFamily, lineSpacing, isVerticalMode, virtualPageIndex)
-                        view.loadDataWithBaseURL(baseUrl, html, "text/html", "utf-8", null)
-                    } else if (isPageReady) {
-                        view.evaluateJavascript("""
-                            if ($virtualPageIndex === -1) {
-                                __mobyTarget = Math.max(0, __mobyCount - 1);
-                                mobySync();
-                                if (window.mobyBridge) {
-                                    window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget.toString());
-                                }
-                            } else if (window.__mobyTarget !== $virtualPageIndex) {
-                                __mobyTarget = $virtualPageIndex;
-                                mobySync();
-                            }
-                        """.trimIndent(), null)
-                    }
+                    webViewRef.value = this
                 }
-            )
-        } else {
-            CircularProgressIndicator(color = theme.toTextHex().let { android.graphics.Color.parseColor(it) }.let { androidx.compose.ui.graphics.Color(it) })
-        }
+            },
+            update = { view ->
+                webViewRef.value = view
+                if (view.tag != internalPath) {
+                    view.tag = internalPath
+                    isPageReady = false
+                } else if (isPageReady) {
+                    view.evaluateJavascript("""
+                        if ($virtualPageIndex === -1) {
+                            __mobyTarget = Math.max(0, __mobyCount - 1);
+                            mobySync();
+                            if (window.mobyBridge) {
+                                window.mobyBridge.onVirtualPageIndexChanged(__mobyTarget.toString());
+                            }
+                        } else if (window.__mobyTarget !== $virtualPageIndex) {
+                            __mobyTarget = $virtualPageIndex;
+                            mobySync();
+                        }
+                    """.trimIndent(), null)
+                }
+            }
+        )
+
 
         // SELECTION POPUP
         if (showSelectionPopup) {

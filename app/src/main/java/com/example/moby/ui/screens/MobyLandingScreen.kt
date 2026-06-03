@@ -1,7 +1,6 @@
 package com.example.moby.ui.screens
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -23,9 +22,7 @@ fun MobyLandingScreen(onFinished: () -> Unit) {
 
     LaunchedEffect(Unit) {
         visible = true
-        delay(1200) 
-        visible = false
-        delay(1000) 
+        delay(600)
         onFinished()
     }
 
@@ -37,8 +34,8 @@ fun MobyLandingScreen(onFinished: () -> Unit) {
     ) {
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(animationSpec = tween(800)),
-            exit = fadeOut(animationSpec = tween(1000))
+            enter = EnterTransition.None,
+            exit = ExitTransition.None
         ) {
             Image(
                 painter = painterResource(id = R.drawable.moby_logo_new),
